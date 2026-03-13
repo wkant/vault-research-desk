@@ -1,0 +1,62 @@
+[
+  {
+    "ticker": "GOOGL",
+    "thesis": "AI + ads + cloud. Dominant platform. Pentagon AI contracts expanding. Less volatile than NVDA for a first investment.",
+    "direction": "BUY",
+    "conviction": "MEDIUM",
+    "date_opened": "2026-03-11",
+    "key_conditions": "Oil sustains >$100 \u2192 sell GOOGL, add XLE; Ceasefire confirmed \u2192 reduce XLE, add GOOGL or NVDA",
+    "status": "ACTIVE",
+    "history": [
+      {
+        "date": "2026-03-11",
+        "note": "Auto-extracted from report."
+      }
+    ]
+  },
+  {
+    "ticker": "XLE",
+    "thesis": "Oil at $85 = massive profits for energy companies. War or peace, energy wins at these prices. Top sector.",
+    "direction": "BUY",
+    "conviction": "HIGH",
+    "date_opened": "2026-03-11",
+    "key_conditions": "Oil sustains >$100 \u2192 sell GOOGL, add XLE; Ceasefire confirmed \u2192 reduce XLE, add GOOGL or NVDA",
+    "status": "ACTIVE",
+    "history": [
+      {
+        "date": "2026-03-11",
+        "note": "Auto-extracted from report."
+      }
+    ]
+  },
+  {
+    "ticker": "XLV",
+    "thesis": "Defensive play. Healthcare in any economy. Biotech M&A heating up. Low correlation to other picks.",
+    "direction": "BUY",
+    "conviction": "MEDIUM",
+    "date_opened": "2026-03-11",
+    "key_conditions": "",
+    "status": "ACTIVE",
+    "history": [
+      {
+        "date": "2026-03-11",
+        "note": "Auto-extracted from report."
+      }
+    ]
+  },
+  {
+    "ticker": "GLD",
+    "thesis": "Gold at $5,187/oz. War + inflation + rate cut expectations. Portfolio insurance.",
+    "direction": "BUY",
+    "conviction": "MEDIUM",
+    "date_opened": "2026-03-11",
+    "key_conditions": "",
+    "status": "ACTIVE",
+    "history": [
+      {
+        "date": "2026-03-11",
+        "note": "Auto-extracted from report."
+      }
+    ]
+  }
+]

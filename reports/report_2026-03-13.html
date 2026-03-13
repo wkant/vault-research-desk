@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vault Research Desk — Report 2026-03-13</title>
+<style>
+/* Vault Research Desk — Light Financial Theme */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Source Serif 4', 'Georgia', serif;
+    background: #fafafa;
+    color: #1a1a1a;
+    line-height: 1.75;
+    padding: 0;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+}
+
+.page {
+    max-width: 820px;
+    margin: 0 auto;
+    background: #ffffff;
+    padding: 3rem 3.5rem 2.5rem;
+    min-height: 100vh;
+    box-shadow: 0 0 40px rgba(0,0,0,0.06);
+}
+
+/* --- Header --- */
+
+.report-header {
+    margin-bottom: 2rem;
+    padding-bottom: 1.2rem;
+    border-bottom: 2px solid #111111;
+}
+
+.report-header h1 {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #888888;
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    margin: 0 0 4px;
+    border: none;
+    padding: 0;
+}
+
+.report-header .title {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    color: #111111;
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+    margin: 0;
+}
+
+.report-header .subtitle {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 14px;
+    color: #666666;
+    margin-top: 6px;
+    font-weight: 400;
+}
+
+/* --- Fallback h1/h2 when no .report-header --- */
+
+h1 {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: #111111;
+    margin: 2rem 0 0.6rem;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #111111;
+    letter-spacing: -0.3px;
+}
+
+h2 {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: #333333;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin: 2.5rem 0 1rem;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+h2:first-child { margin-top: 0; }
+
+h3 {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #555555;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin: 1.6rem 0 0.6rem;
+}
+
+h4 {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #555555;
+    margin: 1.2rem 0 0.4rem;
+}
+
+/* --- Body text --- */
+
+p {
+    margin: 0.6rem 0;
+    color: #2a2a2a;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid #e8e8e8;
+    margin: 2rem 0;
+}
+
+strong {
+    color: #000000;
+    font-weight: 700;
+}
+
+em {
+    color: #555555;
+    font-style: italic;
+}
+
+/* --- Market Snapshot bar --- */
+
+.market-data {
+    background: #f5f6f8;
+    border: 1px solid #e2e4e8;
+    padding: 14px 20px;
+    margin: 1.2rem 0 1.5rem;
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.8;
+    color: #333333;
+}
+
+.market-data li {
+    list-style: none;
+    margin: 0;
+    padding: 2px 0;
+}
+
+.market-data ul {
+    margin: 0;
+    padding: 0;
+}
+
+/* --- Callout boxes --- */
+
+.callout {
+    border-left: 4px solid #333333;
+    background: #f8f8f8;
+    padding: 16px 20px;
+    margin: 1.2rem 0;
+    font-size: 14px;
+}
+
+.callout-warning {
+    border-left-color: #d4a017;
+    background: #fffbf0;
+}
+
+.callout-danger {
+    border-left-color: #c41e1e;
+    background: #fef7f7;
+}
+
+.callout-info {
+    border-left-color: #2a6cb6;
+    background: #f5f8fc;
+}
+
+.callout p {
+    margin: 0.3rem 0;
+}
+
+.callout-label {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 6px;
+    display: block;
+}
+
+.callout-warning .callout-label { color: #a07800; }
+.callout-danger .callout-label { color: #c41e1e; }
+.callout-info .callout-label { color: #2a6cb6; }
+
+/* --- Code --- */
+
+code {
+    font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    background: #f3f3f3;
+    border: 1px solid #e0e0e0;
+    padding: 1px 6px;
+    font-size: 12px;
+    color: #444444;
+}
+
+pre {
+    font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    background: #f5f6f8;
+    border: 1px solid #e2e4e8;
+    padding: 14px 18px;
+    overflow-x: auto;
+    margin: 1rem 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #333333;
+}
+
+pre code {
+    border: none;
+    padding: 0;
+    background: none;
+}
+
+/* --- Blockquotes --- */
+
+blockquote {
+    border-left: 3px solid #999999;
+    padding: 10px 18px;
+    margin: 1.2rem 0;
+    color: #555555;
+    background: #fafafa;
+    font-style: italic;
+}
+
+/* --- Lists --- */
+
+ul, ol {
+    margin: 0.7rem 0 0.7rem 1.4rem;
+}
+
+li {
+    margin: 0.4rem 0;
+    padding-left: 0.3rem;
+}
+
+li::marker {
+    color: #999999;
+}
+
+/* --- Tables --- */
+
+.table-wrap {
+    overflow-x: auto;
+    margin: 1rem 0 1.2rem;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+th {
+    background: #f5f6f8;
+    color: #333333;
+    font-weight: 600;
+    text-align: left;
+    padding: 10px 14px;
+    border-top: 2px solid #333333;
+    border-bottom: 1px solid #cccccc;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    white-space: nowrap;
+}
+
+td {
+    padding: 9px 14px;
+    border-bottom: 1px solid #eeeeee;
+    vertical-align: top;
+    color: #2a2a2a;
+}
+
+tbody tr:nth-child(even) td {
+    background: #fafbfc;
+}
+
+tbody tr:hover td {
+    background: #f0f4f8;
+}
+
+/* --- Conviction indicators --- */
+
+.conviction {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+
+.conviction-high { color: #0d7d2c; }
+.conviction-med { color: #a07800; }
+.conviction-low { color: #888888; }
+
+/* --- P&L / Action colors --- */
+
+td.positive {
+    color: #0d7d2c;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 12.5px;
+}
+
+td.negative {
+    color: #c41e1e;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 12.5px;
+}
+
+td.action-buy {
+    color: #0d7d2c;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+td.action-sell {
+    color: #c41e1e;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+td.action-hold {
+    color: #7a6d00;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+td.action-avoid {
+    color: #b35000;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* --- Ticker labels --- */
+
+td:first-child {
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-weight: 600;
+    font-size: 12.5px;
+    color: #111111;
+}
+
+/* --- Summary line (Total deployed, Cash, etc.) --- */
+
+.summary-line {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #333333;
+    background: #f5f6f8;
+    border: 1px solid #e2e4e8;
+    padding: 10px 16px;
+    margin: 0.8rem 0 1.5rem;
+}
+
+/* --- Status badges --- */
+
+.status-active {
+    display: inline-block;
+    background: #e8f5e9;
+    color: #0d7d2c;
+    border: 1px solid #b8ddb8;
+    padding: 3px 12px;
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}
+
+.status-closed {
+    display: inline-block;
+    background: #f0f0f0;
+    color: #777777;
+    border: 1px solid #cccccc;
+    padding: 3px 12px;
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}
+
+/* --- Footer --- */
+
+.footer {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    text-align: right;
+    color: #aaaaaa;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 3rem;
+    padding-top: 10px;
+    border-top: 1px solid #e0e0e0;
+}
+
+/* --- Print --- */
+
+@media print {
+    body { background: #fff; }
+    .page {
+        box-shadow: none;
+        padding: 1.5rem;
+    }
+    h1 { font-size: 20px; }
+    table { font-size: 11px; }
+    th, td { padding: 6px 10px; }
+    .market-data { background: #f8f8f8; }
+    .callout { break-inside: avoid; }
+    .footer { font-size: 9px; }
+}
+
+/* --- Responsive --- */
+
+@media (max-width: 700px) {
+    .page {
+        padding: 1.5rem 1.2rem;
+    }
+    body { font-size: 14px; }
+    h1 { font-size: 20px; }
+    h2 { font-size: 13px; }
+    table { font-size: 11.5px; }
+    th, td { padding: 6px 8px; }
+    .market-data { font-size: 11.5px; }
+}
+
+</style>
+</head>
+<body>
+<div class="page">
+<div class="report-header">
+<h1>Vault Research Desk</h1>
+<div class="title">Report 2026-03-13</div>
+<div class="subtitle">Week 1 Review — War Grinds On, Portfolio Holds</div>
+</div>
+<h2>What's Happening</h2>
+<p>The Iran war is 14 days old and there's no ceasefire in sight. Iran's president laid out terms — reparations, guarantees, recognition — that the US won't accept. Oil crashed from $119 to $80 on ceasefire hopes, then bounced back to $94 as talks stalled. The S&amp;P 500 hit 3-month lows, erasing all 2026 gains. Three straight down days. The big event next week: FOMC on March 18 — the Fed will almost certainly hold rates, but the new dot plot will tell us if they see oil inflation as temporary or permanent. CPI came in tame at 2.4%, but that was February data — before oil spiked. March CPI will be ugly.</p>
+<p>Your portfolio: <strong>+0.2%</strong> since inception. VOO: <strong>-1.5%</strong>. You're outperforming the market by 1.7% thanks to the energy bet. But it's early.</p>
+<h2>This Week</h2>
+<div class="table-wrap"><table>
+<thead><tr>
+<th>Day</th>
+<th>Event</th>
+<th>Why It Matters</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Wed Mar 18</td>
+<td><strong>FOMC rate decision + dot plot + Powell presser</strong></td>
+<td>Will Fed signal concern about oil inflation? Biggest event.</td>
+</tr>
+<tr>
+<td>Wed Mar 18</td>
+<td>New economic projections</td>
+<td>GDP/inflation forecasts revised for war?</td>
+</tr>
+<tr>
+<td>Ongoing</td>
+<td>Iran ceasefire talks</td>
+<td>Any headline swings oil $10+ either direction</td>
+</tr>
+<tr>
+<td>Ongoing</td>
+<td>Oil price — $93.88 today</td>
+<td>Strait of Hormuz status determines everything</td>
+</tr>
+</tbody></table></div>
+<h2>Changes Since Last Report</h2>
+<div class="table-wrap"><table>
+<thead><tr>
+<th>Pick</th>
+<th>Rec. Price</th>
+<th>Current</th>
+<th>P&amp;L</th>
+<th>Thesis?</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>GOOGL</td>
+<td>$305.00</td>
+<td>$303.55</td>
+<td class="negative">-0.5%</td>
+<td>Intact — AI/ads durable</td>
+</tr>
+<tr>
+<td>XLE</td>
+<td>$56.00</td>
+<td>$57.51</td>
+<td><strong>+2.7%</strong></td>
+<td>Validated — near 52-wk high</td>
+</tr>
+<tr>
+<td>XLV</td>
+<td>$152.00</td>
+<td>$150.16</td>
+<td class="negative">-1.2%</td>
+<td>Weakening — not acting defensive</td>
+</tr>
+<tr>
+<td>GLD</td>
+<td>$470.00</td>
+<td>$466.88</td>
+<td class="negative">-0.7%</td>
+<td>Intact — minor pullback</td>
+</tr>
+</tbody></table></div>
+<div class="table-wrap"><table>
+<thead><tr>
+<th>AVOID calls from last report</th>
+<th>Then</th>
+<th>Now</th>
+<th>Correct?</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>XLY (Consumer Disc.)</td>
+<td>$114.14</td>
+<td>$111.52</td>
+<td>YES (-2.3%)</td>
+</tr>
+<tr>
+<td>XLRE (Real Estate)</td>
+<td>$42.41</td>
+<td>$42.14</td>
+<td>YES (-0.6%)</td>
+</tr>
+<tr>
+<td>IGV (Software)</td>
+<td>$85.74</td>
+<td>$84.99</td>
+<td>YES (-0.9%)</td>
+</tr>
+</tbody></table></div>
+<p>AVOID accuracy: <strong>3/3 (100%)</strong></p>
+<p>Your portfolio: +0.2%. VOO over same period: -1.5%.</p>
+<h2>Your Portfolio</h2>
+<div class="table-wrap"><table>
+<thead><tr>
+<th>Stock</th>
+<th>Shares</th>
+<th>Cost</th>
+<th>Current</th>
+<th>P&amp;L</th>
+<th>Action</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>XLV</td>
+<td>0.9814</td>
+<td>$152</td>
+<td>$150.16</td>
+<td class="negative">-1.2%</td>
+<td><strong>HOLD</strong> (watch — if breaks $140, <strong>SELL</strong>)</td>
+</tr>
+<tr>
+<td>GOOGL</td>
+<td>1.1412</td>
+<td>$305</td>
+<td>$303.55</td>
+<td class="negative">-0.5%</td>
+<td><strong>HOLD</strong></td>
+</tr>
+<tr>
+<td>GLD</td>
+<td>0.1997</td>
+<td>$470</td>
+<td>$466.88</td>
+<td class="negative">-0.7%</td>
+<td><strong>HOLD</strong></td>
+</tr>
+<tr>
+<td>XLE</td>
+<td>3.5994</td>
+<td>$56</td>
+<td>$57.51</td>
+<td class="positive">+2.7%</td>
+<td><strong>HOLD</strong></td>
+</tr>
+</tbody></table></div>
+<p><strong>Total: $794.02 | Cost: $792.66 | P&amp;L: +$1.35 (+0.2%)</strong></p>
+<p>No stops hit. No sells needed. XLV is the weakest link — it's supposed to be defensive but RSI 32.8 and falling while Utilities (XLU) and Staples (XLP) are doing the actual defending. If XLV breaks $140, swap to XLP.</p>
+<h2>What to Buy (when $4,500 arrives)</h2>
+<p>You have $0 cash now. When your monthly $4,500 hits, here's the plan:</p>
+<div class="table-wrap"><table>
+<thead><tr>
+<th>Ticker</th>
+<th>Name</th>
+<th>Conv.</th>
+<th>Entry</th>
+<th>Stop</th>
+<th>Target</th>
+<th>Why</th>
+<th>Size</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>V</td>
+<td>Visa</td>
+<td><code>**</code></td>
+<td>$300-310</td>
+<td>$280 (below 52-wk low)</td>
+<td>$340-350</td>
+<td>Payments duopoly. Near 52-wk low — rare entry. Recession-resistant.</td>
+<td>$1,500 (33%)</td>
+</tr>
+<tr>
+<td>LMT</td>
+<td>Lockheed Martin</td>
+<td><code>**</code></td>
+<td>Research needed</td>
+<td>TBD</td>
+<td>TBD</td>
+<td>Defense spending surge. War = bigger Pentagon budgets. Bipartisan support.</td>
+<td>$1,000 (22%)</td>
+</tr>
+<tr>
+<td>CFG</td>
+<td>Citizens Financial</td>
+<td><code>*</code></td>
+<td>$54-58</td>
+<td>$50</td>
+<td>$65-70</td>
+<td>RSI 24.7 — deeply oversold regional bank. Contrarian mean-reversion play.</td>
+<td>$500 (11%)</td>
+</tr>
+<tr>
+<td><strong>Cash</strong></td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>Hold for FOMC dip opportunity March 18</td>
+<td><strong>$1,500 (34%)</strong></td>
+</tr>
+</tbody></table></div>
+<p><strong>Scaling:</strong> Deploy V and CFG in tranche 1 after $4,500 arrives. Hold $1,500 cash through FOMC. If market dips on FOMC, deploy tranche 2 into the dip. If market rallies, research LMT and deploy following week.</p>
+<p><strong>Why these fix concentration:</strong> Adding V, LMT, and CFG spreads across Financials (V, CFG), Industrials/Defense (LMT) — sectors you don't own yet. GOOGL drops from 44% to ~16% of total portfolio ($794 + $3,000 deployed = ~$3,800 total). Much healthier.</p>
+<h2>What to Avoid</h2>
+<ul>
+<li><strong>Consumer Discretionary (XLY)</strong> — gas prices crushing consumers. 3rd straight AVOID. Correct every time.</li>
+<li><strong>Industrials (XLI)</strong> — worst sector today (-2.51%). Supply chain + oil costs.</li>
+<li><strong>Software (IGV)</strong> — AI disruption fears + rate sensitivity. Down again.</li>
+<li><strong>Don't add to GOOGL</strong> — already 44% of portfolio. Concentration blocker active.</li>
+</ul>
+<h2>Biggest Risks</h2>
+<ol>
+<li><strong>Oil back to $100+.</strong> If Hormuz stays shut and IEA reserves aren't enough, oil re-tests $100-120. Your XLE benefits but everything else gets hammered. Gas prices crush consumers, March CPI spikes, Fed turns hawkish. This is the scenario where "the war is almost over" turns out to be wrong.</li>
+</ol>
+<ol>
+<li><strong>FOMC surprise (March 18).</strong> If the dot plot shows NO rate cuts in 2026 (vs market expecting 1), stocks dump 3-5% immediately. The Fed might see oil inflation as structural, not transitory. Keep $1,500 cash ready for this.</li>
+</ol>
+<ol>
+<li><strong>XLV continues failing as a defensive play.</strong> Healthcare has sector-specific issues (drug pricing, biotech sell-off). If it breaks $140 stop — it's not doing its job. XLP (Staples, RSI 33) or XLU (Utilities, RSI 52) would be better defensive holds.</li>
+</ol>
+<p><strong>Doomsday:</strong> War escalates, oil $150, recession by Q3. GOOGL -25%, XLE +30%, XLV -10%, GLD +15%. Net: +1.5%. You survive because energy and gold offset tech losses.</p>
+<p><strong>Uncomfortable questions:</strong></p>
+<ul>
+<li>If XLV can't protect you during a war, when will it ever be defensive?</li>
+<li>What if Trump's "almost over" stretches to 6 months and $90 oil becomes the new normal?</li>
+</ul>
+<h2>Chief's Corner</h2>
+<p>Pavlo, your first week was fine. +0.2% while the S&amp;P dropped 1.5%. That's the energy/gold hedge working exactly as designed.</p>
+<p><strong>The strategy is balanced but needs diversification.</strong> When your $4,500 arrives, the priority is spreading out — not adding to existing positions. V (payments), LMT (defense), and CFG (oversold bank) would bring you from 4 positions to 6-7 and cut GOOGL from 44% to ~16%.</p>
+<p><strong>Biggest opportunity:</strong> FOMC March 18 could create a buying opportunity if Powell sounds dovish or if the market overreacts to a hawkish dot plot. That's why I'm saying keep 34% cash.</p>
+<p><strong>Biggest threat:</strong> Oil creeping back to $100 without a ceasefire. Watch Hormuz headlines.</p>
+<p><strong>If this, then that:</strong></p>
+<ul>
+<li>Ceasefire confirmed &rarr; trim XLE 25%, deploy into GOOGL or NVDA</li>
+<li>Oil &gt;$100 for 3 days &rarr; hold XLE, hold off on V and CFG</li>
+<li>VIX &gt;35 &rarr; deploy all cash into highest-conviction picks immediately</li>
+</ul>
+<h2>Gut Check</h2>
+<div class="callout callout-warning">
+<span class="callout-label">Behavioral Check</span>
+<p><strong>WATCH OUT: FEAR.</strong> Markets are scary right now. Three straight red days. War headlines everywhere. "S&amp;P erases 2026 gains." Your portfolio is barely green.</p>
+<p>Here's the truth: <strong>a 1% dip that gets sold is worse than a 10% dip that gets held.</strong> You bought 3 days ago. Your stops aren't hit. Your thesis hasn't changed. Oil is doing exactly what you expected. The temptation right now is to "do something" — but the right thing to do is nothing.</p>
+<p>Check prices once a day, not every hour. Your next real decision point is when the $4,500 arrives. Until then, hold.</p>
+</div>
+<h2>Alert Conditions (type <code>flash</code> if triggered)</h2>
+<div class="callout callout-info">
+<span class="callout-label">Watch List</span>
+<ol>
+<li>WTI oil sustains above $100 for 2 days</li>
+<li>VIX spikes above 35</li>
+<li>XLV breaks below $140 (stop-loss)</li>
+</ol>
+</div>
+<h2>Bottom Line</h2>
+<p>Week 1: portfolio +0.2%, beating VOO by 1.7%. No stops hit, no sells needed. XLV is the weak link — watch $140. FOMC March 18 is the next big event. Keep $1,500 cash from next deposit for the dip opportunity. Don't panic, don't overtrade, don't check prices every hour.</p>
+<h2>Disclaimer</h2>
+<p>This is a personal research tool for educational purposes. Not financial advice. All investment decisions are your own. Past performance does not guarantee future results.</p>
+<div class="footer">
+    Vault Research Desk &mdash; 2026-03-13 15:12
+</div>
+</div>
+</body>
+</html>
