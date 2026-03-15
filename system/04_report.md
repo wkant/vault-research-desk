@@ -88,8 +88,10 @@ One short paragraph. Educational purposes only. Not financial advice.
 1. Save as `reports/report_YYYY-MM-DD.md`
 2. Run `python3 tools/html_report.py reports/report_YYYY-MM-DD.md` — **always generate HTML**
 3. Run `python3 tools/thesis_tracker.py extract reports/report_YYYY-MM-DD.md` — **track theses**
-4. Run `python3 tools/self_analyze.py` — **auto self-improve after every report**
-5. Open the HTML file so the investor can review it immediately
+4. Run `python3 tools/watchlist_extract.py reports/report_YYYY-MM-DD.md` — **track watchlist picks**
+5. Run `python3 tools/scorer.py` — **performance scorecard**
+6. Run `python3 tools/self_analyze.py` — **auto self-improve after every report** (saves to vault.db, auto-patches system files if issues found)
+7. Open the HTML file so the investor can review it immediately
 
 ## After Every Trade
 When the investor confirms they executed trades based on a report:
@@ -100,7 +102,7 @@ When the investor confirms they executed trades based on a report:
    - Status: ACTIVE / CLOSED
 2. Run `python3 tools/html_report.py trades/trade_YYYY-MM-DD.md` — **always generate HTML**
 3. Update `portfolio.md` (only when the investor explicitly asks)
-4. Update `tools/performance_log.csv`
+4. Performance data is auto-tracked in vault.db
 
 **Reports are analysis. Trades are actions.** Not every report leads to a trade.
 

@@ -5,13 +5,13 @@ learn_from_pros.py — One-time learning tool
 Fetches public hedge fund 13F data from SEC EDGAR, analyzes patterns,
 extracts rules, and patches system files with improvements.
 
-Run once → learn → patch system → delete data.
+Run once → learn → patch system → done.
 
 Usage:
     python3 tools/learn_from_pros.py              # fetch, analyze, apply
     python3 tools/learn_from_pros.py --analyze    # analyze cached data only
     python3 tools/learn_from_pros.py --apply      # apply improvements only
-    python3 tools/learn_from_pros.py --cleanup    # delete fetched data
+    python3 tools/learn_from_pros.py --cleanup    # clear DB tables
 """
 
 import json
@@ -28,9 +28,11 @@ from xml.etree import ElementTree as ET
 from collections import defaultdict, Counter
 from pathlib import Path
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+from db import VaultDB
+
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data" / "13f"
-IMPROVEMENTS_DIR = ROOT / "improvements"
 
 # ── Top funds to study (SEC EDGAR CIK numbers) ──────────────────────
 FUNDS = {
@@ -360,7 +362,7 @@ def generate_improvements(patterns: dict) -> list:
             "Optimizes growth while preventing ruin."
         ),
         "recommendation": (
-            "After 20+ trades in performance_log.csv, calculate win rate and avg win/loss "
+            "After 20+ trades in vault.db, calculate win rate and avg win/loss "
             "by conviction level. Use simplified Kelly to validate position sizes."
         ),
         "applies_to": "system/05_position_mgmt.md",
@@ -455,7 +457,7 @@ Retail adaptation:
 *Source: Berkshire top 5 holdings = 70% of $267B portfolio. Concentration works when thesis is validated.*
 
 ### Simplified Kelly Criterion (after 20+ trades)
-Once performance_log.csv has 20+ closed trades, calculate:
+Once vault.db has 20+ closed trades, calculate:
 ```
 kelly_pct = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win
 ```
@@ -556,8 +558,7 @@ For every BUY recommendation, Devil's Gate should consider:
 
         marker = "<!-- PRO-INSIGHT: CONVICTION SIZING -->"
         if marker not in content:
-            patch = f"""
-{marker}
+            patch = f"""{marker}
 **Conviction-weighted exception (learned from pro analysis):**
 - `***` HIGH conviction picks may go up to 18% (override 15% limit) IF thesis passed all Devil's Gate tests
 - This is the Buffett rule: concentrate when conviction is highest
@@ -656,8 +657,7 @@ def generate_report(patterns: dict, improvements: list, applied: list) -> str:
     lines.append("- **Fidelity** — sector rotation aligned with business cycle stages")
 
     lines.append("\n---")
-    lines.append("*Learnings absorbed into system files. Raw data can be safely deleted.*")
-    lines.append("*Run `python3 tools/learn_from_pros.py --cleanup` to remove fetched data.*")
+    lines.append("*Learnings absorbed into system files. Data stored in vault.db.*")
 
     return "\n".join(lines)
 
@@ -668,27 +668,14 @@ def main():
     parser = argparse.ArgumentParser(description="Learn from pro investors — one-time improvement tool")
     parser.add_argument("--analyze", action="store_true", help="Analyze cached data only (skip fetch)")
     parser.add_argument("--apply", action="store_true", help="Apply improvements only (skip fetch + analyze)")
-    parser.add_argument("--cleanup", action="store_true", help="Delete fetched data from data/13f/")
+    parser.add_argument("--cleanup", action="store_true", help="Clear 13F data from vault.db")
     args = parser.parse_args()
 
     # Cleanup mode
     if args.cleanup:
-        import shutil
-        if DATA_DIR.exists():
-            shutil.rmtree(DATA_DIR)
-            print("Deleted data/13f/ directory")
-            # Remove parent if empty
-            parent = DATA_DIR.parent
-            if parent.exists() and not any(parent.iterdir()):
-                parent.rmdir()
-                print("Deleted empty data/ directory")
-        else:
-            print("Nothing to clean up — data/13f/ does not exist")
+        print("Data lives in vault.db — no separate files to clean.")
+        print("To clear 13F tables, use sqlite3 vault.db directly.")
         return
-
-    # Ensure directories
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    IMPROVEMENTS_DIR.mkdir(exist_ok=True)
 
     all_analyses = []
 
@@ -702,11 +689,11 @@ def main():
             for fund_name, cik in FUNDS.items():
                 print(f"\n  {fund_name} (CIK: {cik})")
 
-                # Check cache
-                cache_file = DATA_DIR / f"{fund_name.replace(' ', '_').lower()}.json"
-                if cache_file.exists():
-                    print("    Using cached data")
-                    cached = json.loads(cache_file.read_text())
+                # Check DB cache
+                with VaultDB() as db:
+                    cached = db.reconstruct_fund_analysis(fund_name)
+                if cached:
+                    print("    Using cached data from vault.db")
                     all_analyses.append(cached)
                     continue
 
@@ -739,15 +726,36 @@ def main():
                 analysis = analyze_fund(fund_name, holdings, filing_date)
                 all_analyses.append(analysis)
 
-                # Cache
-                cache_file.write_text(json.dumps(analysis, indent=2))
+                # Persist to DB
+                total_value = sum(h["value"] for h in holdings)
+                with VaultDB() as db:
+                    db.add_fund(
+                        name=fund_name,
+                        quarter="Q4-2025",
+                        portfolio_value=analysis.get("total_value_millions"),
+                        num_positions=analysis.get("num_positions"),
+                        top5_conc=analysis.get("top5_pct"),
+                        top10_conc=analysis.get("top10_pct"),
+                        filing_date=filing_date,
+                    )
+                    for h in holdings:
+                        db.add_institutional(
+                            fund=fund_name,
+                            ticker=h.get("name", ""),
+                            company_name=h.get("name", ""),
+                            shares=h.get("shares"),
+                            value=h.get("value"),
+                            pct_portfolio=round(h["value"] / total_value * 100, 2) if total_value else 0,
+                            quarter="Q4-2025",
+                            filing_date=filing_date,
+                        )
 
                 time.sleep(0.15)  # Rate limiting
         else:
-            # Load cached analyses
-            print("Loading cached data from data/13f/...")
-            for f in sorted(DATA_DIR.glob("*.json")):
-                all_analyses.append(json.loads(f.read_text()))
+            # Load cached analyses from DB
+            print("Loading cached data from vault.db...")
+            with VaultDB() as db:
+                all_analyses = db.get_all_fund_analyses()
             print(f"  Loaded {len(all_analyses)} fund analyses")
 
     # ── STEP 2: Extract patterns ────────────────────────────────
@@ -757,10 +765,14 @@ def main():
 
     if args.apply:
         # Load cached for pattern extraction
-        for f in sorted(DATA_DIR.glob("*.json")):
-            all_analyses.append(json.loads(f.read_text()))
+        with VaultDB() as db:
+            all_analyses = db.get_all_fund_analyses()
 
     patterns = extract_patterns(all_analyses)
+
+    # Rebuild consensus in DB after pattern extraction
+    with VaultDB() as db:
+        db.rebuild_consensus()
 
     if patterns:
         print(f"\n  Funds analyzed: {patterns.get('num_funds', 0)}")
@@ -795,17 +807,33 @@ def main():
     if not applied:
         print("  All improvements already applied (idempotent)")
 
-    # ── STEP 5: Generate learning report ────────────────────────
+    # ── STEP 5: Save improvements to DB ─────────────────────────
     print("\n" + "=" * 60)
-    print("STEP 5: Generating learning report")
+    print("STEP 5: Saving improvements to vault.db")
     print("=" * 60)
 
-    report = generate_report(patterns, improvements, applied)
     now = datetime.now()
-    report_name = f"learn_from_pros_{now.strftime('%Y-%m-%d_%H%M')}.md"
-    report_path = IMPROVEMENTS_DIR / report_name
-    report_path.write_text(report)
-    print(f"\n  Report saved: improvements/{report_name}")
+    today = now.strftime("%Y-%m-%d")
+    with VaultDB() as db:
+        # Clear previous learn_from_pros improvements
+        db.clear_improvements('learn_from_pros')
+        for imp in improvements:
+            db.add_improvement(
+                date=today,
+                imp_type='learn_from_pros',
+                category=imp['area'],
+                priority='MEDIUM',
+                finding=imp['finding'],
+                action=imp['recommendation'],
+                target_file=imp['applies_to'],
+                status='applied' if imp['applies_to'] in [a.split(' — ')[0] for a in applied] else 'active',
+                source='learn_from_pros.py',
+            )
+    print(f"  Saved {len(improvements)} improvements to DB")
+
+    # Print report to console
+    report = generate_report(patterns, improvements, applied)
+    print("\n" + report)
 
     print("\n" + "=" * 60)
     print("DONE")
@@ -813,8 +841,7 @@ def main():
     print(f"\n  {len(all_analyses)} funds analyzed")
     print(f"  {len(improvements)} improvements generated")
     print(f"  {len(applied)} patches applied to system files")
-    print(f"  Report: improvements/{report_name}")
-    print(f"\n  To clean up: python3 tools/learn_from_pros.py --cleanup")
+    print(f"  All data saved to vault.db")
 
 
 if __name__ == "__main__":

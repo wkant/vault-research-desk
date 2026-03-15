@@ -12,20 +12,53 @@ Usage:
 
 import sys
 import os
-import csv
 import argparse
 import random
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from data_fetcher import fetch_technicals, fetch_earnings_date
+from data_fetcher import fetch_technicals, fetch_earnings_date, read_portfolio
+
+from db import VaultDB
 
 try:
     import yfinance as yf
 except ImportError:
     print("ERROR: yfinance not installed. Run: pip3 install yfinance")
     sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# Sector mapping — ticker to GICS sector
+# ---------------------------------------------------------------------------
+SECTOR_ETF_MAP = {
+    "XLK": "Technology", "XLV": "Healthcare", "XLF": "Financials",
+    "XLE": "Energy", "XLY": "Consumer Discretionary", "XLP": "Consumer Staples",
+    "XLI": "Industrials", "XLB": "Materials", "XLRE": "Real Estate",
+    "XLU": "Utilities", "XLC": "Communication Services",
+    "GLD": "Commodities", "SLV": "Commodities", "USO": "Energy",
+}
+
+def _get_ticker_sector(ticker):
+    """Get sector for a ticker via yfinance info. Returns sector string or None."""
+    if ticker in SECTOR_ETF_MAP:
+        return SECTOR_ETF_MAP[ticker]
+    try:
+        t = yf.Ticker(ticker)
+        info = t.info
+        return info.get("sector", None)
+    except Exception:
+        return None
+
+def _detect_portfolio_sectors():
+    """Read portfolio and identify which sectors are already owned."""
+    port_tickers, _, _ = read_portfolio()
+    owned_sectors = set()
+    for ticker in port_tickers:
+        sector = _get_ticker_sector(ticker)
+        if sector:
+            owned_sectors.add(sector)
+    return owned_sectors, port_tickers
 
 # ---------------------------------------------------------------------------
 # S&P 500 tickers (as of early 2026)
@@ -114,11 +147,20 @@ def fetch_price_and_volume(ticker):
         return {}
 
 
-def scan_ticker(ticker):
+def scan_ticker(ticker, missing_sectors=None, owned_tickers=None):
     """Run all signal checks for a single ticker.
+
+    Args:
+        ticker: Stock ticker symbol
+        missing_sectors: Set of sectors not in portfolio (gets +2 boost)
+        owned_tickers: List of tickers already owned (skip these)
 
     Returns a dict with all data and detected signals, or None on failure.
     """
+    # Skip tickers already in portfolio
+    if owned_tickers and ticker in owned_tickers:
+        return None
+
     tech = fetch_technicals(ticker)
     if not tech:
         return None
@@ -182,18 +224,31 @@ def scan_ticker(ticker):
         signals.append("Unusual Volume")
         score += 1
 
-    # 8. Earnings within 7 days (informational, no score)
+    # 8. Earnings within 7 days — WARNING, not a buy signal
     earnings_date = fetch_earnings_date(ticker)
     earnings_soon = False
     if earnings_date:
         try:
             ed = datetime.strptime(earnings_date, "%Y-%m-%d").date()
             today = datetime.now().date()
-            if 0 <= (ed - today).days <= 7:
+            days_to_earnings = (ed - today).days
+            if 0 <= days_to_earnings <= 3:
+                signals.append("⚠ Earnings <3d")
+                earnings_soon = True
+                score -= 1  # Penalize — system rule says don't buy 1-3 days before earnings
+            elif 3 < days_to_earnings <= 7:
                 signals.append("Earnings Soon")
                 earnings_soon = True
         except (ValueError, TypeError):
             pass
+
+    # 9. Sector gap bonus — boost stocks in sectors portfolio doesn't own
+    sector = None
+    if missing_sectors:
+        sector = _get_ticker_sector(ticker)
+        if sector and sector in missing_sectors:
+            signals.append(f"Fills Gap: {sector}")
+            score += 2
 
     if not signals:
         return None
@@ -211,6 +266,7 @@ def scan_ticker(ticker):
         "volume_ratio": volume_ratio,
         "earnings_date": earnings_date,
         "earnings_soon": earnings_soon,
+        "sector": sector,
         "signals": signals,
         "score": score,
     }
@@ -302,36 +358,6 @@ def print_results(all_results, top_n):
     print()
 
 
-def write_csv(all_results):
-    """Write results to tools/screener_output.csv."""
-    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screener_output.csv")
-    today = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "date", "ticker", "price", "rsi", "dma_50", "dma_200",
-            "high_52w", "low_52w", "volume_ratio", "earnings_date", "signals", "score",
-        ])
-        for r in all_results:
-            writer.writerow([
-                today,
-                r["ticker"],
-                r["price"],
-                r.get("rsi", ""),
-                r.get("dma_50", ""),
-                r.get("dma_200", ""),
-                r.get("high_52w", ""),
-                r.get("low_52w", ""),
-                r.get("volume_ratio", ""),
-                r.get("earnings_date", ""),
-                "; ".join(r["signals"]),
-                r["score"],
-            ])
-
-    print(f"Results written to {output_path}")
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -347,6 +373,8 @@ def main():
                         help="Scan N random tickers instead of all 500")
     parser.add_argument("--top", type=int, default=20,
                         help="Show top N results (default 20)")
+    parser.add_argument("--no-sectors", action="store_true",
+                        help="Disable sector gap detection")
     args = parser.parse_args()
 
     tickers = SP500_TICKERS[:]
@@ -355,6 +383,26 @@ def main():
 
     scan_count = len(tickers)
     total = len(tickers)
+
+    # Detect portfolio sector gaps
+    missing_sectors = None
+    owned_tickers = None
+    all_sectors = {
+        "Technology", "Healthcare", "Financials", "Energy",
+        "Consumer Discretionary", "Consumer Staples", "Industrials",
+        "Materials", "Real Estate", "Utilities", "Communication Services",
+    }
+    if not args.no_sectors:
+        try:
+            owned_sectors, owned_tickers = _detect_portfolio_sectors()
+            missing_sectors = all_sectors - owned_sectors
+            if owned_sectors:
+                print(f"Portfolio sectors: {', '.join(sorted(owned_sectors))}")
+                if missing_sectors:
+                    print(f"Missing sectors:  {', '.join(sorted(missing_sectors))} (+2 score boost)")
+                print()
+        except Exception:
+            pass
 
     print(f"Vault Research Desk — Screener")
     print(f"Scanning {total} tickers...")
@@ -366,12 +414,34 @@ def main():
         if i % 50 == 0 or i == total:
             print(f"Scanning... {i}/{total}")
 
-        result = scan_ticker(ticker)
+        result = scan_ticker(ticker, missing_sectors, owned_tickers)
         if result:
             all_results.append(result)
 
     print_results(all_results, args.top)
-    write_csv(all_results)
+
+    # Save results to DB
+    try:
+        with VaultDB() as db:
+            db_results = []
+            for r in all_results:
+                db_results.append({
+                    'ticker': r['ticker'],
+                    'price': r.get('price'),
+                    'rsi': r.get('rsi'),
+                    'dma_50': r.get('dma_50'),
+                    'dma_200': r.get('dma_200'),
+                    'high_52w': r.get('high_52w'),
+                    'low_52w': r.get('low_52w'),
+                    'volume_ratio': r.get('volume_ratio'),
+                    'earnings_date': r.get('earnings_date'),
+                    'signals': '; '.join(r.get('signals', [])),
+                    'score': r.get('score'),
+                    'sector': r.get('sector'),
+                })
+            db.save_screener_run(db_results)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

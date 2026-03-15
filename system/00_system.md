@@ -18,8 +18,8 @@ A personal investment research system. It produces weekly market reports with BU
 | `screen` | Run tools/screener.py — S&P 500 scan | Ranked candidate list |
 | `alerts` | Run tools/alerts.py — check alert thresholds | Alert status |
 | `sync [file]` | Run tools/ibkr_sync.py — IBKR CSV import | Portfolio preview/update |
-| `self-analyze` | Run tools/self_analyze.py — system self-review | Improvement report |
-| `learn-from-pros` | Run tools/learn_from_pros.py — fetch 13F data, extract patterns, patch system | Learning report |
+| `self-analyze` | Run tools/self_analyze.py — system self-review | Results in vault.db |
+| `learn-from-pros` | Run tools/learn_from_pros.py — fetch 13F data, extract patterns, patch system | Results in vault.db |
 
 ---
 
@@ -27,10 +27,14 @@ A personal investment research system. It produces weekly market reports with BU
 
 ```
 PHASE 0: Data Collection
-    tools/data_fetcher.py — prices, technicals, breadth (mandatory)
+    tools/data_fetcher.py — prices, technicals, breadth, news, auto-alerts (mandatory)
     tools/screener.py --sample 50 — quick candidate scan (mandatory)
     tools/correlation.py — portfolio correlation check (mandatory)
     tools/thesis_tracker.py check — review active theses (mandatory)
+    tools/insider_check.py --portfolio — insider activity for holdings (if new picks in Phase 2, check those too)
+    tools/news.py --portfolio — cached news for holdings (auto-run by data_fetcher if FINNHUB_API_KEY set)
+    tools/smart_money.py ark — ARK daily trades (what is Cathie Wood buying/selling?)
+    tools/smart_money.py gurus — superinvestor holdings from Dataroma
     ↓
 PHASE 1: Research (01_research.md — macro + sectors + sentiment)
     ↓
@@ -101,13 +105,16 @@ CAN verify (use these):
 - Moving averages, RSI (yfinance/tools/data_fetcher.py calculates these)
 - Market breadth approximation (tools/data_fetcher.py samples ~55 stocks)
 - Screener signals: RSI extremes, DMA crossovers, volume (tools/screener.py)
+- News headlines and summaries (tools/news.py via Finnhub + Marketaux, cached in vault.db)
+- News sentiment scores per ticker (Marketaux, cached in vault.db)
+- ARK Invest daily trades (tools/smart_money.py ark, cached in vault.db)
+- Superinvestor holdings (tools/smart_money.py gurus via Dataroma, cached in vault.db)
 - Earnings dates (yfinance)
 
 CANNOT verify (don't fabricate):
 - Put/call ratios (unless found in a specific source — cite it)
 - Fund flows / dark pool data (institutional-only)
 - CNN Fear & Greed exact number (web search if available, otherwise skip)
-- 13F filings in real-time
 - Chart patterns (LLMs can't see charts)
 
 **If you can't verify it, say "not available" instead of estimating.**

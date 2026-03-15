@@ -10,6 +10,7 @@ Usage:
 """
 
 import sys
+import os
 import json
 from datetime import datetime, timedelta
 
@@ -20,6 +21,10 @@ except ImportError:
     print("ERROR: Required packages not installed.")
     print("Run: pip3 install yfinance pandas")
     sys.exit(1)
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+from db import VaultDB
 
 # --- Configuration ---
 
@@ -179,6 +184,12 @@ def fetch_quote(ticker):
             'volume': int(current['Volume']),
         }
 
+        try:
+            with VaultDB() as db:
+                db.cache_quote(ticker, result)
+        except Exception:
+            pass
+
         return result
     except Exception as e:
         return {'error': str(e)}
@@ -216,6 +227,12 @@ def fetch_technicals(ticker):
         # % from 52-week high
         current = close.iloc[-1]
         result['pct_from_high'] = round((current - result['high_52w']) / result['high_52w'] * 100, 1)
+
+        try:
+            with VaultDB() as db:
+                db.cache_technicals(ticker, result)
+        except Exception:
+            pass
 
         return result
     except Exception:
@@ -315,6 +332,7 @@ def main():
             print(f"  {k}: {v}")
 
     # --- Macro Data ---
+    macro_prices = {}  # Collect for DB snapshot
     if not portfolio_only:
         print(f"\n{'─' * 40}")
         print("MACRO DATA")
@@ -327,11 +345,13 @@ def main():
             if q and 'error' not in q:
                 sign = '+' if q['change_pct'] >= 0 else ''
                 print(f"{name:<15} {q['price']:>12,.2f} {sign}{q['change_pct']:>7.2f}%")
+                macro_prices[ticker] = q['price']
             else:
                 err = q.get('error', 'no data') if q else 'no data'
                 print(f"{name:<15} {'ERROR':>12} {err}")
 
     # --- Sector ETFs ---
+    sector_ranked = []
     if not portfolio_only:
         print(f"\n{'─' * 40}")
         print("SECTOR PERFORMANCE")
@@ -362,8 +382,10 @@ def main():
             for i, (name, ticker, price, chg, rsi) in enumerate(ranked, 1):
                 sign = '+' if chg >= 0 else ''
                 print(f"  {i:>2}. {name:<16} ({ticker}) {sign}{chg:.2f}%")
+                sector_ranked.append((name, ticker, price, chg, rsi, i))
 
     # --- Market Breadth ---
+    breadth = None
     if not portfolio_only:
         print(f"\n{'─' * 40}")
         print("MARKET BREADTH (approximate)")
@@ -451,9 +473,148 @@ def main():
             else:
                 print(f"\n  {ticker}: ERROR")
 
+    # --- Auto-run alerts ---
+    if not portfolio_only:
+        print(f"\n{'─' * 40}")
+        print("ALERT CHECK (auto)")
+        print(f"{'─' * 40}")
+        try:
+            import subprocess
+            alerts_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alerts.py")
+            result = subprocess.run(
+                [sys.executable, alerts_script],
+                capture_output=True, text=True, timeout=60,
+            )
+            # Print only the results, skip blank lines at start
+            for line in result.stdout.strip().split("\n"):
+                print(f"  {line}")
+        except Exception as e:
+            print(f"  Could not run alerts: {e}")
+
+    # --- Log benchmark to CSV ---
+    if not portfolio_only and port_tickers:
+        try:
+            _log_benchmark(total_value, total_cost)
+        except Exception:
+            pass
+
+    # --- News fetch (Finnhub) ---
+    # Check api_keys.conf as fallback for FINNHUB key
+    _finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
+    if not _finnhub_key:
+        _conf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_keys.conf")
+        if os.path.exists(_conf):
+            with open(_conf) as _f:
+                for _line in _f:
+                    _line = _line.strip()
+                    if _line.startswith("FINNHUB_API_KEY="):
+                        _finnhub_key = _line.split("=", 1)[1].strip()
+                        os.environ["FINNHUB_API_KEY"] = _finnhub_key
+                        break
+    if not portfolio_only and _finnhub_key:
+        print(f"\n{'─' * 40}")
+        print("NEWS FETCH (Finnhub)")
+        print(f"{'─' * 40}")
+        try:
+            from news import get_news
+            # Market news
+            market_articles = get_news("MARKET", force=False)
+            print(f"  MARKET: {len(market_articles)} articles")
+            # Portfolio + candidate news
+            news_tickers = list(set(port_tickers + extra_tickers))
+            for t in news_tickers:
+                articles = get_news(t, days_back=7, force=False)
+                print(f"  {t}: {len(articles)} articles")
+        except Exception as e:
+            print(f"  News fetch error: {e}")
+
+    # --- Sync to DB ---
+    try:
+        with VaultDB() as db:
+            # Sync holdings from portfolio.md
+            db.sync_holdings_from_portfolio()
+
+            # Save market snapshot
+            if macro_prices:
+                today = datetime.now().strftime("%Y-%m-%d")
+                breadth_50 = breadth.get('above_50dma_pct') if not portfolio_only and breadth else None
+                breadth_200 = breadth.get('above_200dma_pct') if not portfolio_only and breadth else None
+                db.save_market_snapshot(
+                    date=today,
+                    spy=macro_prices.get("^GSPC"),
+                    vix=macro_prices.get("^VIX"),
+                    oil=macro_prices.get("CL=F"),
+                    gold=macro_prices.get("GC=F"),
+                    dxy=macro_prices.get("DX-Y.NYB"),
+                    ten_year=macro_prices.get("^TNX"),
+                    nasdaq=macro_prices.get("^IXIC"),
+                    breadth_50=breadth_50,
+                    breadth_200=breadth_200,
+                )
+
+            # Save sector performance rankings
+            if not portfolio_only and sector_ranked:
+                today = datetime.now().strftime("%Y-%m-%d")
+                for name, ticker, price, chg, rsi, rank in sector_ranked:
+                    db.save_sector_performance(
+                        date=today,
+                        sector=name,
+                        etf_ticker=ticker,
+                        price=price,
+                        change_1w=chg,  # daily change stored as 1w placeholder
+                        rsi=rsi if isinstance(rsi, (int, float)) else None,
+                        rank=rank,
+                    )
+    except Exception:
+        pass
+
     print(f"\n{'=' * 60}")
     print(f"  Data fetch complete. {datetime.now().strftime('%H:%M:%S')}")
     print(f"{'=' * 60}")
+
+
+def _log_benchmark(portfolio_value, portfolio_cost):
+    """Log today's portfolio vs VOO snapshot to DB."""
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # Read portfolio start date and VOO inception price
+    _, _, settings = read_portfolio()
+    start_date = settings.get("start_date", "2026-03-10")
+
+    # Get VOO current
+    voo_q = fetch_quote("VOO")
+    if not voo_q or "error" in voo_q:
+        return
+
+    voo_price = voo_q["price"]
+
+    # Get VOO price at inception
+    try:
+        t = yf.Ticker("VOO")
+        dt = datetime.strptime(start_date, "%Y-%m-%d")
+        start = (dt - timedelta(days=3)).strftime("%Y-%m-%d")
+        end = (dt + timedelta(days=3)).strftime("%Y-%m-%d")
+        hist = t.history(start=start, end=end)
+        if hist.empty:
+            return
+        hist.index = hist.index.tz_localize(None)
+        target = pd.Timestamp(dt)
+        valid = hist.index[hist.index <= target]
+        voo_inception = float(hist.loc[valid[-1]]["Close"]) if len(valid) > 0 else float(hist.iloc[0]["Close"])
+    except Exception:
+        return
+
+    portfolio_pct = round((portfolio_value - portfolio_cost) / portfolio_cost * 100, 2) if portfolio_cost > 0 else 0
+    voo_pct = round((voo_price - voo_inception) / voo_inception * 100, 2)
+    alpha = round(portfolio_pct - voo_pct, 2)
+
+    # Write to DB only
+    try:
+        with VaultDB() as db:
+            db.add_benchmark(today, portfolio_value, portfolio_pct,
+                             voo_price, voo_pct, alpha)
+    except Exception:
+        pass
 
 
 if __name__ == '__main__':

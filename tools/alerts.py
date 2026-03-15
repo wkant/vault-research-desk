@@ -24,7 +24,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.join(SCRIPT_DIR, '..')
 sys.path.insert(0, SCRIPT_DIR)
 
-from data_fetcher import fetch_quote
+from data_fetcher import fetch_quote, fetch_technicals, fetch_earnings_date
+from db import VaultDB
 
 # ---------------------------------------------------------------------------
 # Asset name -> yfinance ticker mapping
@@ -138,7 +139,18 @@ def check_alert(description):
             'label': description,
         }
 
-    quote = fetch_quote(ticker)
+    # Try DB cache first
+    quote = None
+    try:
+        with VaultDB() as db:
+            cached = db.get_cached_quote(ticker, max_age_minutes=15)
+            if cached and cached.get('price'):
+                quote = {'price': cached['price']}
+    except Exception:
+        pass
+
+    if quote is None:
+        quote = fetch_quote(ticker)
     if quote is None or 'error' in quote:
         return {
             'description': description,
@@ -252,6 +264,15 @@ def main():
         for r in thesis_results:
             print(format_result(r))
 
+    # --- Portfolio-level checks ---
+    portfolio_alerts = check_portfolio_health()
+    if portfolio_alerts:
+        print()
+        print("PORTFOLIO HEALTH:")
+        for alert in portfolio_alerts:
+            print(f"  {alert}")
+        triggered_count += sum(1 for a in portfolio_alerts if "⚠" in a)
+
     print()
     if triggered_count > 0:
         noun = "ALERT" if triggered_count == 1 else "ALERTS"
@@ -259,6 +280,71 @@ def main():
     else:
         print("RESULT: No alerts triggered. All clear.")
     print()
+
+
+def check_portfolio_health():
+    """Check portfolio-level alerts: drawdown, earnings conflicts."""
+    alerts = []
+    with VaultDB() as db:
+        db_holdings = db.get_holdings()
+    port_tickers = [r["ticker"] for r in db_holdings]
+    holdings = {r["ticker"]: {"shares": r["shares"], "cost": r["cost_basis"]} for r in db_holdings}
+    if not port_tickers:
+        return alerts
+
+    # Try getting all quotes from DB cache at once
+    cached_quotes = {}
+    try:
+        with VaultDB() as db:
+            for ticker in port_tickers:
+                cached = db.get_cached_quote(ticker, max_age_minutes=15)
+                if cached and cached.get('price'):
+                    cached_quotes[ticker] = cached['price']
+    except Exception:
+        cached_quotes = {}
+
+    # --- Drawdown circuit breaker ---
+    total_value = 0
+    total_cost = 0
+    for ticker in port_tickers:
+        h = holdings.get(ticker, {})
+        shares = h.get("shares", 0)
+        cost = h.get("cost", 0)
+        if ticker in cached_quotes:
+            q = {'price': cached_quotes[ticker]}
+        else:
+            q = fetch_quote(ticker)
+        if q and "error" not in q:
+            total_value += shares * q["price"]
+        total_cost += shares * cost
+
+    if total_cost > 0:
+        drawdown_pct = (total_value - total_cost) / total_cost * 100
+        if drawdown_pct <= -15:
+            alerts.append(f"  ⚠ DRAWDOWN CIRCUIT BREAKER: Portfolio at {drawdown_pct:+.1f}% — raise cash to 30%+")
+        elif drawdown_pct <= -10:
+            alerts.append(f"  [WARN] Portfolio drawdown: {drawdown_pct:+.1f}% — approaching -15% circuit breaker")
+
+    # --- Earnings conflict check (skip ETFs) ---
+    etf_tickers = {"XLE", "XLV", "XLK", "XLF", "XLY", "XLP", "XLI", "XLB",
+                   "XLRE", "XLU", "XLC", "GLD", "SLV", "VOO", "SPY", "QQQ", "IWM"}
+    for ticker in port_tickers:
+        if ticker in etf_tickers:
+            continue
+        ed = fetch_earnings_date(ticker)
+        if ed:
+            try:
+                from datetime import date as date_type
+                ed_date = datetime.strptime(ed, "%Y-%m-%d").date()
+                days_to = (ed_date - datetime.now().date()).days
+                if 0 <= days_to <= 3:
+                    alerts.append(f"  ⚠ EARNINGS WARNING: {ticker} reports in {days_to} day(s) ({ed}) — do NOT add to position")
+                elif 3 < days_to <= 7:
+                    alerts.append(f"  [INFO] {ticker} earnings in {days_to} days ({ed})")
+            except (ValueError, TypeError):
+                pass
+
+    return alerts
 
 
 if __name__ == '__main__':

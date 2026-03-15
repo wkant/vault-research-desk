@@ -6,7 +6,9 @@ Collect real data, assess the macro environment, identify which sectors and asse
 ## Inputs
 - `tools/data_fetcher.py` output (prices, technicals, macro data, market breadth)
 - `tools/screener.py` output (if available — ranked candidates with technical signals)
-- Web searches for qualitative context (geopolitical developments, policy changes, breaking news)
+- Cached news from vault.db (Finnhub headlines + Marketaux sentiment scores)
+- Smart money data from vault.db (ARK daily trades, guru holdings, 13F consensus)
+- Web searches for qualitative context (only when cached news is insufficient)
 - Previous report (if exists) for continuity
 
 ## Execution
@@ -17,16 +19,27 @@ python3 tools/data_fetcher.py
 ```
 This gives you verified prices, moving averages, RSI, sector performance, VIX, macro indicators, and market breadth. Use these numbers — do not override them with guesses.
 
-If a screener scan is available (`tools/screener_output.csv`), review it for BUY candidates with strong technical signals. Screener output supplements — does not replace — your own analysis.
+Screener results are stored in vault.db. Review for BUY candidates with strong technical signals. Screener output supplements — does not replace — your own analysis.
+
+### Step 1.5: Check Cached News
+If news data is available in vault.db (auto-fetched by data_fetcher or `python3 tools/news.py --portfolio`):
+- Review cached headlines for portfolio holdings and BUY candidates
+- Use these as primary news source — they replace most web searches
+- Flag any breaking news that needs deeper investigation via web search
+
+### Step 1.6: Review Smart Money Signals
+Check vault.db for smart money activity (from `smart_money.py` or data already cached):
+- ARK Invest: what is Cathie Wood buying/selling this week?
+- Guru consensus: which tickers are held by 2+ superinvestors?
+- If a portfolio holding or BUY candidate shows up in smart money data, note it for Phase 2
 
 ### Step 2: Web Searches for Context
-Search for what tools/data_fetcher.py can't provide:
-- Top geopolitical headlines affecting markets
-- Latest Fed commentary / FOMC expectations
-- Any breaking news since last report
-- Upcoming earnings for portfolio holdings and BUY candidates
+Search ONLY for what cached news and data_fetcher can't provide:
+- Specific data points (CPI, NFP releases, FOMC minutes)
+- Upcoming earnings dates for portfolio holdings
+- Deep context on a breaking story flagged in cached news
 
-Only search for what you need. Don't run 15 searches when 5 will do.
+Only search for what you need. Cached news covers most headline context.
 
 ### Step 3: Produce Research Output
 

@@ -28,6 +28,10 @@ from urllib.error import URLError, HTTPError
 from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+from db import VaultDB
+
 # ── Config ─────────────────────────────────────────────────────────
 
 HEADERS = {
@@ -503,7 +507,15 @@ def shorten_title(title: str) -> str:
 
 
 def read_portfolio_tickers() -> list:
-    """Read tickers from portfolio.md."""
+    """Read tickers from DB (primary), fallback to portfolio.md."""
+    try:
+        with VaultDB() as db:
+            holdings = db.get_holdings()
+            if holdings:
+                return [r['ticker'] for r in holdings]
+    except Exception:
+        pass
+    # Fallback: parse portfolio.md directly (in case DB not synced yet)
     portfolio_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "portfolio.md"
     )
@@ -608,6 +620,26 @@ def check_insider_activity(ticker: str, days: int = None) -> dict:
 
     result["transactions"] = unique_txns
     result["signal_analysis"] = analyze_signal(unique_txns)
+
+    # Save transactions to DB for historical tracking
+    try:
+        with VaultDB() as _db:
+            for t in unique_txns:
+                txn_type_map = {"P": "BUY", "S": "SELL", "A": "AWARD", "M": "EXERCISE"}
+                _db.add_insider_txn(
+                    ticker=ticker.upper(),
+                    insider_name=t.get("insider_name"),
+                    title=t.get("insider_title"),
+                    txn_type=txn_type_map.get(t.get("transaction_code"), t.get("transaction_code", "")),
+                    shares=t.get("shares"),
+                    price=t.get("price_per_share"),
+                    value=t.get("total_value"),
+                    txn_date=t.get("transaction_date"),
+                    filing_date=t.get("filing_date"),
+                    source="SEC EDGAR Form 4",
+                )
+    except Exception:
+        pass
 
     return result
 

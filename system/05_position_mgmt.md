@@ -48,7 +48,7 @@ After a position moves in your favor:
 ### When a Stop Triggers
 - The stop triggered → the position is SOLD. No "let me hold a little longer."
 - The next report must acknowledge the stop hit and explain what happened
-- Log it in performance_log.csv
+- Log it in vault.db (auto-tracked by the system)
 - Wait at least 1 week before re-entering the same name (prevent revenge trading)
 
 ---
@@ -111,10 +111,8 @@ Set at time of purchase. Example for a 4-position portfolio:
 ## Performance Tracking
 
 ### After Every Report
-Log every call in `performance_log.csv`:
-```csv
-date,ticker,action,entry,stop,target,conviction,status,exit_price,exit_date,return,notes
-```
+Log every call in vault.db (auto-tracked by the system).
+Fields tracked: date, ticker, action, entry, stop, target, conviction, status, exit_price, exit_date, return, notes.
 
 Status values: OPEN / HIT_TARGET / STOPPED_OUT / CLOSED_EARLY / EXPIRED
 
@@ -181,7 +179,7 @@ Retail adaptation:
 *Source: Berkshire top 5 holdings = 70% of $267B portfolio. Concentration works when thesis is validated.*
 
 ### Simplified Kelly Criterion (after 20+ trades)
-Once performance_log.csv has 20+ closed trades, calculate:
+Once vault.db has 20+ closed trades, calculate:
 ```
 kelly_pct = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win
 ```

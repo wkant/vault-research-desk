@@ -33,8 +33,21 @@ except ImportError:
 # Portfolio reader (mirrors data_fetcher.py logic)
 # ---------------------------------------------------------------------------
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+from db import VaultDB
+
+
 def read_portfolio_tickers():
-    """Read tickers from portfolio.md."""
+    """Read tickers from DB (primary), fallback to portfolio.md."""
+    try:
+        with VaultDB() as db:
+            holdings = db.get_holdings()
+            if holdings:
+                return [r['ticker'] for r in holdings]
+    except Exception:
+        pass
+    # Fallback: parse portfolio.md directly (in case DB not synced yet)
     portfolio_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "portfolio.md"
     )

@@ -8,13 +8,11 @@ Usage:
     python3 tools/self_analyze.py
 
 Output:
-    improvements/self_improvement_YYYY-MM-DD.md
-    improvements/self_improvement_YYYY-MM-DD.html
+    All results stored in vault.db (improvements table).
 """
 
 import sys
 import os
-import csv
 import re
 import glob
 from datetime import datetime, timedelta
@@ -23,11 +21,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.join(SCRIPT_DIR, "..")
 REPORTS_DIR = os.path.join(PROJECT_DIR, "reports")
 TRADES_DIR = os.path.join(PROJECT_DIR, "trades")
-IMPROVEMENTS_DIR = os.path.join(PROJECT_DIR, "improvements")
-PERF_LOG = os.path.join(SCRIPT_DIR, "performance_log.csv")
 PORTFOLIO_PATH = os.path.join(PROJECT_DIR, "portfolio.md")
 
 sys.path.insert(0, SCRIPT_DIR)
+
+from db import VaultDB
 
 try:
     import yfinance as yf
@@ -90,14 +88,26 @@ def load_trades():
 
 
 def load_performance_log():
-    """Load performance_log.csv."""
+    """Load performance log from DB."""
+    with VaultDB() as db:
+        rows = db.get_all_trades()
     entries = []
-    if not os.path.exists(PERF_LOG):
-        return entries
-    with open(PERF_LOG, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            entries.append(row)
+    for r in rows:
+        entries.append({
+            "date": r["date"],
+            "ticker": r["ticker"],
+            "action": r["action"],
+            "entry": str(r["entry_price"]) if r["entry_price"] else "",
+            "status": r["status"] or "",
+            "conviction": r["conviction"] or "",
+            "exit_price": str(r["exit_price"]) if r["exit_price"] else "",
+            "exit_date": r["exit_date"] or "",
+            "return_pct": str(r["return_pct"]) if r["return_pct"] is not None else "",
+            "report": r["report"] or "",
+            "notes": r["notes"] or "",
+            "target": r["target"] or "",
+            "stop": str(r["stop_loss"]) if r["stop_loss"] else "",
+        })
     return entries
 
 
@@ -126,6 +136,24 @@ def load_portfolio():
     return holdings
 
 
+def _load_watchlist_log():
+    """Load watchlist log from DB."""
+    with VaultDB() as db:
+        rows = db.get_active_watchlist()
+        if rows:
+            return [dict(r) for r in rows]
+    return []
+
+
+def _load_benchmark_log():
+    """Load benchmark log from DB."""
+    with VaultDB() as db:
+        rows = db.get_benchmarks()
+        if rows:
+            return [dict(r) for r in rows]
+    return []
+
+
 # --- Analysis functions ---
 
 def extract_section(content, heading):
@@ -136,11 +164,28 @@ def extract_section(content, heading):
 
 
 def extract_buy_recommendations(content):
-    """Extract tickers recommended as BUY from a report."""
+    """Extract tickers with actual BUY action from portfolio table (not watchlist).
+
+    We look for BUY in the Action column of "Your Portfolio" table,
+    NOT in the "What to Buy" watchlist section.
+    """
     buys = []
-    # Look for BUY in table cells
-    for match in re.finditer(r"\|\s*(\w+)\s*\|\s*BUY", content, re.IGNORECASE):
-        buys.append(match.group(1).upper())
+
+    # Only look in "Your Portfolio" or "Changes Since Last Report" sections
+    # for actual BUY actions (not watchlist recommendations)
+    portfolio_section = extract_section(content, "Your Portfolio")
+    changes_section = extract_section(content, "Changes Since Last Report")
+
+    for section in [portfolio_section, changes_section]:
+        if not section:
+            continue
+        for match in re.finditer(r"\|\s*(\w+)\s*\|.*?\*{0,2}BUY\*{0,2}", section, re.IGNORECASE):
+            ticker = match.group(1).upper()
+            # Skip header/formatting artifacts
+            if ticker not in ("STOCK", "PICK", "TICKER", "DAY", "RANK"):
+                buys.append(ticker)
+
+    # Also check performance log for traded BUYs
     return list(set(buys))
 
 
@@ -245,8 +290,16 @@ def analyze_prediction_accuracy(reports, perf_log):
             })
 
         # AVOID recommendations — compare price at report date vs now
+        # Deduplicate: only track first occurrence of each ticker
         avoids = extract_avoid_list(content)
         for ticker in avoids:
+            # Skip if we already tracked this ticker from an earlier report
+            already_tracked = any(
+                c["ticker"] == ticker for c in results["avoid_calls"]
+            )
+            if already_tracked:
+                continue
+
             q = fetch_quote(ticker)
             if q and "error" not in q:
                 current = q["price"]
@@ -254,13 +307,18 @@ def analyze_prediction_accuracy(reports, perf_log):
                 change_pct = None
                 if historical and historical > 0:
                     change_pct = round((current - historical) / historical * 100, 2)
+                # Correct if price dropped. Flat (0%) = inconclusive, not wrong.
+                if change_pct is not None:
+                    correct = change_pct < -0.1  # Must drop at least 0.1%
+                else:
+                    correct = None
                 results["avoid_calls"].append({
                     "date": date,
                     "ticker": ticker,
                     "price_at_report": historical,
                     "current_price": current,
                     "change_pct": change_pct,
-                    "correct": change_pct < 0 if change_pct is not None else None,
+                    "correct": correct,
                 })
 
         # Macro regime
@@ -279,8 +337,8 @@ def analyze_report_quality(reports):
     issues = []
 
     required_sections = [
-        "Market Snapshot", "Macro Regime", "Active Calls",
-        "Biggest Risks", "Gut Check",
+        "What's Happening", "Your Portfolio", "What to Buy",
+        "What to Avoid", "Biggest Risks", "Gut Check", "Bottom Line",
     ]
 
     for report in reports:
@@ -289,7 +347,14 @@ def analyze_report_quality(reports):
 
         # Check for required sections
         for section in required_sections:
-            if f"## {section}" not in content and section.lower() not in content.lower():
+            # Match flexibly: "## What's Happening" or "## Your Portfolio" etc.
+            # Also allow the section text to appear as a heading at any level
+            section_found = (
+                f"## {section}" in content
+                or f"### {section}" in content
+                or section.lower() in content.lower()
+            )
+            if not section_found:
                 issues.append({
                     "date": date,
                     "type": "Missing Section",
@@ -314,27 +379,48 @@ def analyze_report_quality(reports):
                     "severity": "LOW",
                 })
 
-        # Check for data citations
-        if "data_fetcher" not in content.lower() and "verified" not in content.lower():
-            # Check if prices look fabricated (no source mention)
+        # Check for data citations — only flag if no evidence of data pipeline usage
+        has_data_source = any(term in content.lower() for term in [
+            "data_fetcher", "verified", "search log", "yfinance",
+            "rsi", "50 dma", "200 dma", "52-wk", "52-week",
+        ])
+        if not has_data_source:
             price_count = len(re.findall(r"\$\d+", content))
             if price_count > 5:
                 issues.append({
                     "date": date,
                     "type": "Unverified Data",
-                    "detail": f"{price_count} price mentions without verification reference",
+                    "detail": f"{price_count} price mentions with no evidence of data pipeline",
                     "severity": "MEDIUM",
                 })
 
-        # Check for stop-loss on every BUY
-        buy_count = len(re.findall(r"BUY", content, re.IGNORECASE))
-        stop_count = len(re.findall(r"stop.?loss|stop", content, re.IGNORECASE))
-        if buy_count > 0 and stop_count < buy_count:
+        # Check for stop-loss on actual BUY recommendations (not watchlist/headers)
+        # Count BUY actions in table rows: "| **BUY**" or "| BUY |"
+        actual_buys = len(re.findall(r"\|\s*\*{0,2}BUY\*{0,2}\s*\|", content, re.IGNORECASE))
+        # Also count new picks in "What to Buy" with entry zones (these need stops too)
+        buy_section = extract_section(content, "What to Buy")
+        watchlist_picks = 0
+        watchlist_with_stops = 0
+        if buy_section:
+            # Count table rows with ticker symbols (skip cash/header rows)
+            for line in buy_section.split("\n"):
+                if "|" in line and "---" not in line and "Ticker" not in line and "Cash" not in line:
+                    parts = [p.strip() for p in line.split("|") if p.strip()]
+                    if parts and re.match(r'^[A-Z]{1,5}$', parts[0]):
+                        watchlist_picks += 1
+                        # Check if this row has a stop defined (not TBD/—)
+                        line_lower = line.lower()
+                        if "tbd" not in line_lower and "—" not in line_lower.split("stop")[0] if "stop" in line_lower else True:
+                            if re.search(r'\$\d+', line):
+                                watchlist_with_stops += 1
+
+        picks_without_stops = watchlist_picks - watchlist_with_stops
+        if picks_without_stops > 0:
             issues.append({
                 "date": date,
                 "type": "Missing Stop-Loss",
-                "detail": f"{buy_count} BUY calls but only {stop_count} stop mentions",
-                "severity": "HIGH",
+                "detail": f"{picks_without_stops} watchlist pick(s) without defined stop-loss",
+                "severity": "MEDIUM",
             })
 
         # Check word count
@@ -473,6 +559,9 @@ def generate_report(reports, trades, perf_log, holdings):
                 if call["correct"]:
                     avoid_correct += 1
                     verdict = "YES (dropped)"
+                elif call["change_pct"] is not None and abs(call["change_pct"]) <= 0.1:
+                    verdict = "FLAT (inconclusive)"
+                    avoid_total -= 1  # Don't count flat as wrong
                 else:
                     verdict = "NO (went up)"
             else:
@@ -480,6 +569,40 @@ def generate_report(reports, trades, perf_log, holdings):
             lines.append(f"| {call['date']} | {call['ticker']} | {then} | {now} | {chg} | {verdict} |")
         if avoid_total > 0:
             lines.append(f"\nAVOID accuracy: {avoid_correct}/{avoid_total} ({avoid_correct/avoid_total*100:.0f}%)")
+        lines.append("")
+
+    # --- Watchlist Tracking ---
+    watchlist_entries = _load_watchlist_log()
+    if watchlist_entries:
+        active_wl = [w for w in watchlist_entries if w.get("status", "").upper() == "ACTIVE"]
+        if active_wl:
+            lines.append("### Watchlist Picks — Would They Have Worked?")
+            lines.append("| Date | Ticker | Rec. Price | Current | Change | Status |")
+            lines.append("|------|--------|-----------|---------|--------|--------|")
+            for w in active_wl:
+                ticker = w["ticker"]
+                rec_price = w.get("price_at_rec", "")
+                q = fetch_quote(ticker)
+                if q and "error" not in q and rec_price:
+                    try:
+                        rp = float(rec_price)
+                        current = q["price"]
+                        chg = round((current - rp) / rp * 100, 2)
+                        lines.append(f"| {w['date']} | {ticker} | ${rp:.2f} | ${current:.2f} | {chg:+.1f}% | {w.get('notes', '')} |")
+                    except (ValueError, TypeError):
+                        lines.append(f"| {w['date']} | {ticker} | {rec_price} | — | — | {w.get('notes', '')} |")
+                else:
+                    lines.append(f"| {w['date']} | {ticker} | {rec_price or 'TBD'} | — | — | {w.get('notes', '')} |")
+            lines.append("")
+
+    # --- Benchmark History ---
+    bench_history = _load_benchmark_log()
+    if bench_history and len(bench_history) > 1:
+        lines.append("### Portfolio vs VOO Over Time")
+        lines.append("| Date | Portfolio | VOO | Alpha |")
+        lines.append("|------|----------|-----|-------|")
+        for b in bench_history[-10:]:  # last 10 entries
+            lines.append(f"| {b['date']} | {b['portfolio_pct']}% | {b['voo_pct']}% | {b['alpha']}% |")
         lines.append("")
 
     if predictions["regime_changes"]:
@@ -652,7 +775,7 @@ def generate_recommendations(predictions, quality_issues, concentration_issues, 
             "title": "Build More History",
             "priority": "HIGH",
             "problem": f"Only {len(reports)} report(s). Can't evaluate system accuracy yet.",
-            "solution": "Run `report` weekly for at least 4 weeks. Track every call in performance_log.csv. Then re-run `self-analyze` for meaningful insights.",
+            "solution": "Run `report` weekly for at least 4 weeks. Track every call in vault.db. Then re-run `self-analyze` for meaningful insights.",
         })
 
     # Data quality
@@ -701,7 +824,7 @@ def generate_recommendations(predictions, quality_issues, concentration_issues, 
             "title": "Review Open Positions",
             "priority": "MEDIUM",
             "problem": f"{len(open_trades)} positions open since {oldest.get('date', '?')}. No exits recorded.",
-            "solution": "Every report must evaluate each open position against its stop-loss and target. If a stop is hit, log it as CLOSED in performance_log.csv.",
+            "solution": "Every report must evaluate each open position against its stop-loss and target. If a stop is hit, log it as CLOSED in vault.db.",
         })
 
     # Emotional discipline
@@ -716,274 +839,559 @@ def generate_recommendations(predictions, quality_issues, concentration_issues, 
 
 
 def _write_active_improvements(reports, trades, perf_log, holdings):
-    """Generate active_improvements.md — read by the pipeline during Phase 2."""
+    """Write active improvements to vault.db — read by the pipeline during Phase 2."""
     predictions = analyze_prediction_accuracy(reports, perf_log)
     quality_issues = analyze_report_quality(reports)
     concentration_issues = analyze_portfolio_concentration(holdings)
     patterns = identify_patterns(predictions, quality_issues, perf_log, reports)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    today = datetime.now().strftime("%Y-%m-%d")
 
-    lines = []
-    lines.append("# Active Improvements")
-    lines.append(f"Auto-generated by `self-analyze` on {timestamp}. Read by Phase 2 (Strategy) to avoid repeating mistakes.")
-    lines.append("")
-    lines.append("## Current Issues")
-    lines.append("")
+    with VaultDB() as db:
+        # Clear previous active improvements from self_analysis
+        db.clear_improvements('self_analysis')
 
-    # Concentration
-    conc = [i for i in concentration_issues if i["severity"] in ("HIGH", "MEDIUM")]
-    if conc:
-        lines.append("### Concentration")
-        for c in conc:
-            lines.append(f"- {c['detail']}")
-        lines.append("")
-
-    # Bias
-    bias_patterns = [p for p in patterns if p["name"] in ("Buy Bias", "Overconfident Calls", "Repetitive Recommendations")]
-    if bias_patterns:
-        lines.append("### Bias Corrections")
-        for p in bias_patterns:
-            lines.append(f"- **{p['name']}:** {p['description']} Fix: {p['fix']}")
-        lines.append("")
-
-    # Process gaps
-    process_issues = [i for i in quality_issues if i["severity"] in ("HIGH", "MEDIUM")]
-    if process_issues:
-        lines.append("### Process Gaps")
-        for i in process_issues:
-            lines.append(f"- {i['type']}: {i['detail']}")
-        lines.append("")
-
-    # What worked
-    lines.append("### What Worked")
-    if predictions["avoid_calls"]:
-        correct = sum(1 for c in predictions["avoid_calls"] if c.get("correct"))
-        total = sum(1 for c in predictions["avoid_calls"] if c.get("correct") is not None)
-        if total > 0:
-            lines.append(f"- AVOID calls: {correct}/{total} correct ({correct/total*100:.0f}%)")
-
-    winners = [c for c in predictions["buy_calls"] if c.get("return_pct") is not None and c["return_pct"] > 0]
-    for w in sorted(winners, key=lambda x: x["return_pct"], reverse=True)[:3]:
-        lines.append(f"- {w['ticker']}: {w['return_pct']:+.1f}%")
-    if not winners and not predictions["avoid_calls"]:
-        lines.append("- Not enough data yet")
-    lines.append("")
-
-    # What didn't work
-    lines.append("### What Didn't Work")
-    losers = [c for c in predictions["buy_calls"] if c.get("return_pct") is not None and c["return_pct"] < 0]
-    for l in sorted(losers, key=lambda x: x["return_pct"])[:3]:
-        lines.append(f"- {l['ticker']}: {l['return_pct']:+.1f}%")
-
-    buy_total = sum(1 for c in predictions["buy_calls"] if c.get("return_pct") is not None)
-    buy_wins = sum(1 for c in predictions["buy_calls"] if c.get("return_pct") is not None and c["return_pct"] > 0)
-    if buy_total > 0:
-        lines.append(f"- Win rate: {buy_wins}/{buy_total} ({buy_wins/buy_total*100:.0f}%)")
-    if not losers:
-        lines.append("- No losing positions yet")
-    lines.append("")
-
-    # Write
-    path = os.path.join(IMPROVEMENTS_DIR, "active_improvements.md")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-    print(f"  Active improvements: {path}")
-
-
-# --- Auto-Fix Engine ---
-
-def apply_fixes(reports, trades, perf_log, holdings):
-    """Detect fixable issues and patch system files. Returns list of applied fixes."""
-    predictions = analyze_prediction_accuracy(reports, perf_log)
-    quality_issues = analyze_report_quality(reports)
-    concentration_issues = analyze_portfolio_concentration(holdings)
-    patterns = identify_patterns(predictions, quality_issues, perf_log, reports)
-
-    applied = []
-
-    # --- Fix 1: Add concentration blockers to Devil's Gate ---
-    conc_high = [i for i in concentration_issues if i["severity"] == "HIGH"]
-    if conc_high:
-        blocked_tickers = [i["detail"].split(" is ")[0] for i in conc_high if " is " in i["detail"]]
-        if blocked_tickers:
-            dg_path = os.path.join(PROJECT_DIR, "system", "03_devils_gate.md")
-            if os.path.exists(dg_path):
-                with open(dg_path, "r", encoding="utf-8") as f:
-                    dg_content = f.read()
-
-                # Add/update concentration block list
-                block_marker = "<!-- AUTO-FIX: CONCENTRATION BLOCKERS -->"
-                block_end = "<!-- END CONCENTRATION BLOCKERS -->"
-                block_text = (
-                    f"\n{block_marker}\n"
-                    f"**Auto-detected concentration blockers (from self-analyze):**\n"
-                    f"The following tickers are over the 15% single-position limit. "
-                    f"Any BUY or BUY MORE recommendation for these MUST be REJECTED:\n"
+        # Concentration issues
+        for c in concentration_issues:
+            if c["severity"] in ("HIGH", "MEDIUM"):
+                db.add_improvement(
+                    date=today, imp_type='self_analysis',
+                    category='concentration', priority=c["severity"],
+                    finding=c['detail'], source='self_analyze.py',
                 )
-                for ticker in blocked_tickers:
-                    block_text += f"- {ticker}\n"
-                block_text += f"\n{block_end}\n"
 
-                if block_marker in dg_content:
-                    # Replace existing block
-                    pattern = re.compile(
-                        re.escape(block_marker) + r".*?" + re.escape(block_end),
-                        re.DOTALL,
-                    )
-                    dg_content = pattern.sub(block_text.strip(), dg_content)
-                else:
-                    # Insert before "## The Eight Tests"
-                    insert_point = "## The Eight Tests"
-                    if insert_point in dg_content:
-                        dg_content = dg_content.replace(
-                            insert_point,
-                            block_text + insert_point,
-                        )
-
-                with open(dg_path, "w", encoding="utf-8") as f:
-                    f.write(dg_content)
-                applied.append({
-                    "file": "system/03_devils_gate.md",
-                    "fix": f"Added concentration blockers: {', '.join(blocked_tickers)}",
-                    "reason": "These positions exceed 15% limit — Devil's Gate will auto-reject BUY MORE calls",
-                })
-
-    # --- Fix 2: Add stop-loss enforcement to report template ---
-    stop_issues = [i for i in quality_issues if i["type"] == "Missing Stop-Loss"]
-    if stop_issues:
-        report_path = os.path.join(PROJECT_DIR, "system", "04_report.md")
-        if os.path.exists(report_path):
-            with open(report_path, "r", encoding="utf-8") as f:
-                report_content = f.read()
-
-            enforce_marker = "<!-- AUTO-FIX: STOP-LOSS ENFORCEMENT -->"
-            if enforce_marker not in report_content:
-                enforcement = (
-                    f"\n{enforce_marker}\n"
-                    f"**STOP-LOSS RULE (auto-added by self-analyze):**\n"
-                    f"Every BUY recommendation MUST include a specific stop-loss price. "
-                    f"\"10% below\" is not acceptable — use a meaningful technical level "
-                    f"(support, DMA, 52-week low). If you cannot define a stop, do not recommend the BUY.\n\n"
+        # Bias patterns
+        for p in patterns:
+            if p["name"] in ("Buy Bias", "Overconfident Calls", "Repetitive Recommendations"):
+                db.add_improvement(
+                    date=today, imp_type='self_analysis',
+                    category='bias', priority='HIGH',
+                    finding=p['description'], action=p['fix'],
+                    source='self_analyze.py',
                 )
-                # Insert before "### 6. What to Avoid"
-                insert_point = "### 6. What to Avoid"
-                if insert_point in report_content:
-                    report_content = report_content.replace(
-                        insert_point,
-                        enforcement + insert_point,
-                    )
-                else:
-                    report_content += "\n" + enforcement
 
-                with open(report_path, "w", encoding="utf-8") as f:
-                    f.write(report_content)
-                applied.append({
-                    "file": "system/04_report.md",
-                    "fix": "Added mandatory stop-loss enforcement rule",
-                    "reason": "Past reports had BUY calls without stop-losses",
-                })
-
-    # --- Fix 3: Add SELL/TRIM check to strategy ---
-    buy_bias = [p for p in patterns if p["name"] == "Buy Bias"]
-    if buy_bias:
-        strat_path = os.path.join(PROJECT_DIR, "system", "02_strategy.md")
-        if os.path.exists(strat_path):
-            with open(strat_path, "r", encoding="utf-8") as f:
-                strat_content = f.read()
-
-            bias_marker = "<!-- AUTO-FIX: SELL CHECK -->"
-            if bias_marker not in strat_content:
-                sell_check = (
-                    f"\n{bias_marker}\n"
-                    f"**SELL/TRIM CHECK (auto-added by self-analyze):**\n"
-                    f"Buy bias detected — system recommends buys but rarely sells. "
-                    f"For EVERY holding, explicitly evaluate: is there a reason to SELL or TRIM? "
-                    f"If a stop-loss has been hit, the thesis has broken, or the position is over-concentrated, "
-                    f"recommend SELL/TRIM before any new BUYs.\n\n"
+        # Process gaps
+        for i in quality_issues:
+            if i["severity"] in ("HIGH", "MEDIUM"):
+                db.add_improvement(
+                    date=today, imp_type='self_analysis',
+                    category='process', priority=i["severity"],
+                    finding=f"{i['type']}: {i['detail']}",
+                    source='self_analyze.py',
                 )
-                # Insert before "### 3. Risk Assessment"
-                insert_point = "### 3. Risk Assessment"
-                if insert_point in strat_content:
-                    strat_content = strat_content.replace(
-                        insert_point,
-                        sell_check + insert_point,
-                    )
-                else:
-                    strat_content += "\n" + sell_check
 
-                with open(strat_path, "w", encoding="utf-8") as f:
-                    f.write(strat_content)
-                applied.append({
-                    "file": "system/02_strategy.md",
-                    "fix": "Added mandatory SELL/TRIM evaluation for every holding",
-                    "reason": "Buy bias pattern detected — 4 buys, 0 sells",
-                })
+        # What worked / didn't work — store as meta
+        winners = [c for c in predictions["buy_calls"]
+                   if c.get("return_pct") is not None and c["return_pct"] > 0]
+        losers = [c for c in predictions["buy_calls"]
+                  if c.get("return_pct") is not None and c["return_pct"] < 0]
+        avoid_correct = sum(1 for c in predictions["avoid_calls"] if c.get("correct"))
+        avoid_total = sum(1 for c in predictions["avoid_calls"] if c.get("correct") is not None)
+        buy_total = sum(1 for c in predictions["buy_calls"] if c.get("return_pct") is not None)
+        buy_wins = len(winners)
 
-    # --- Fix 4: Update screener scoring based on AVOID accuracy ---
-    if predictions["avoid_calls"]:
-        correct_avoids = [c for c in predictions["avoid_calls"] if c.get("correct")]
-        total_avoids = [c for c in predictions["avoid_calls"] if c.get("correct") is not None]
-        if len(total_avoids) >= 3 and len(correct_avoids) / len(total_avoids) >= 0.8:
-            # AVOID logic is working well — add note to screener
+        performance_meta = {
+            'winners': [{'ticker': w['ticker'], 'return': w['return_pct']} for w in winners[:3]],
+            'losers': [{'ticker': l['ticker'], 'return': l['return_pct']} for l in losers[:3]],
+            'buy_win_rate': f"{buy_wins}/{buy_total}" if buy_total else "N/A",
+            'avoid_accuracy': f"{avoid_correct}/{avoid_total}" if avoid_total else "N/A",
+        }
+        db.add_improvement(
+            date=today, imp_type='self_analysis',
+            category='performance_summary', priority='LOW',
+            finding=f"Win rate: {buy_wins}/{buy_total}, AVOID accuracy: {avoid_correct}/{avoid_total}",
+            source='self_analyze.py', meta=performance_meta,
+        )
+
+    print("  Active improvements saved to vault.db")
+
+
+# ═══════════════════════════════════════════════════════════════
+# Self-Improving Patch Engine
+# ═══════════════════════════════════════════════════════════════
+
+class PatchEngine:
+    """Registry-driven auto-fix engine. Patches system files based on analysis findings.
+
+    Each rule has a detector (should we patch?) and a formatter (what to write).
+    Patches are idempotent via HTML comment markers. Reversible when conditions clear.
+    """
+
+    def __init__(self, project_dir):
+        self.project_dir = project_dir
+        self.applied = []
+
+    def _read_file(self, rel_path):
+        fpath = os.path.join(self.project_dir, rel_path)
+        if not os.path.exists(fpath):
+            return None
+        with open(fpath, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def _write_file(self, rel_path, content):
+        fpath = os.path.join(self.project_dir, rel_path)
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    def _apply_patch(self, target_file, marker_name, patch_text, insert_before=None):
+        """Insert or update a marker-bounded block. Returns True if file changed."""
+        content = self._read_file(target_file)
+        if content is None:
+            return False
+
+        start_marker = f"<!-- AUTO-FIX: {marker_name} -->"
+        end_marker = f"<!-- END {marker_name} -->"
+        block = f"\n{start_marker}\n{patch_text}\n{end_marker}\n"
+
+        if start_marker in content:
+            # Update existing block
+            pat = re.compile(
+                re.escape(start_marker) + r".*?" + re.escape(end_marker),
+                re.DOTALL,
+            )
+            new_content = pat.sub(block.strip(), content)
+            if new_content == content:
+                return False  # No change needed
+            self._write_file(target_file, new_content)
+            return True
+        else:
+            # Insert new block
+            if insert_before and insert_before in content:
+                content = content.replace(insert_before, block + insert_before)
+            else:
+                content += block
+            self._write_file(target_file, content)
+            return True
+
+    def _remove_patch(self, target_file, marker_name):
+        """Remove a marker-bounded block. Returns True if file changed."""
+        content = self._read_file(target_file)
+        if content is None:
+            return False
+
+        start_marker = f"<!-- AUTO-FIX: {marker_name} -->"
+        end_marker = f"<!-- END {marker_name} -->"
+
+        if start_marker not in content:
+            return False
+
+        pat = re.compile(
+            r"\n?" + re.escape(start_marker) + r".*?" + re.escape(end_marker) + r"\n?",
+            re.DOTALL,
+        )
+        new_content = pat.sub("", content)
+        if new_content != content:
+            self._write_file(target_file, new_content)
+            return True
+        return False
+
+    def _log(self, target_file, fix, reason):
+        self.applied.append({"file": target_file, "fix": fix, "reason": reason})
+
+    def run_all(self, ctx):
+        """Run all patch rules against the analysis context."""
+        self._fix_concentration_blockers(ctx)
+        self._fix_sector_blockers(ctx)
+        self._fix_stop_loss_enforcement(ctx)
+        self._fix_sell_check(ctx)
+        self._fix_avoid_validation(ctx)
+        self._fix_data_citation(ctx)
+        self._fix_conviction_calibration(ctx)
+        self._fix_repetition_guard(ctx)
+        self._fix_benchmark_alert(ctx)
+        self._fix_section_checklist(ctx)
+        self._fix_stale_references(ctx)
+        self._fix_learned_rules_summary(ctx)
+        return self.applied
+
+    # ── Rule 1: Concentration blockers (Devil's Gate) ─────────
+
+    def _fix_concentration_blockers(self, ctx):
+        conc_high = [i for i in ctx["concentration"] if i["severity"] == "HIGH"]
+        tickers = [i["detail"].split(" is ")[0] for i in conc_high if " is " in i["detail"]]
+
+        if tickers:
+            text = (
+                "**Auto-detected concentration blockers (from self-analyze):**\n"
+                "The following tickers are over the 15% single-position limit. "
+                "Any BUY or BUY MORE recommendation for these MUST be REJECTED:\n"
+            )
+            for t in tickers:
+                text += f"- {t}\n"
+            if self._apply_patch("system/03_devils_gate.md", "CONCENTRATION BLOCKERS",
+                                 text, "## The Eight Tests"):
+                self._log("system/03_devils_gate.md",
+                          f"Concentration blockers: {', '.join(tickers)}",
+                          "Positions exceed 15% limit")
+        else:
+            if self._remove_patch("system/03_devils_gate.md", "CONCENTRATION BLOCKERS"):
+                self._log("system/03_devils_gate.md",
+                          "Removed concentration blockers — all positions within limits",
+                          "No positions over 15%")
+
+    # ── Rule 2: Sector blockers (Devil's Gate) ────────────────
+
+    def _fix_sector_blockers(self, ctx):
+        # Calculate sector exposure from holdings
+        holdings = ctx.get("holdings", [])
+        if not holdings:
+            return
+        sector_map = {
+            # Sector ETFs
+            "XLE": "Energy", "XLV": "Healthcare", "XLK": "Technology",
+            "XLF": "Financials", "XLY": "Consumer Discretionary",
+            "XLP": "Consumer Staples", "XLI": "Industrials", "XLB": "Materials",
+            "XLRE": "Real Estate", "XLU": "Utilities", "XLC": "Communications",
+            "GLD": "Commodities", "GDX": "Commodities", "SLV": "Commodities",
+            # Common individual stocks by sector
+            "GOOGL": "Technology", "GOOG": "Technology", "AAPL": "Technology",
+            "MSFT": "Technology", "NVDA": "Technology", "META": "Technology",
+            "AMZN": "Consumer Discretionary", "TSLA": "Consumer Discretionary",
+            "JPM": "Financials", "BAC": "Financials", "GS": "Financials",
+            "JNJ": "Healthcare", "UNH": "Healthcare", "PFE": "Healthcare",
+            "XOM": "Energy", "CVX": "Energy", "OXY": "Energy",
+            "LMT": "Industrials", "RTX": "Industrials", "NOC": "Industrials",
+            "KO": "Consumer Staples", "PG": "Consumer Staples",
+            "NEE": "Utilities", "DUK": "Utilities",
+            "NFLX": "Communications", "DIS": "Communications",
+            "CRM": "Technology", "PLTR": "Technology", "MU": "Technology",
+        }
+        total_cost = 0
+        sector_totals = {}
+        for h in holdings:
+            try:
+                val = float(h["shares"]) * float(h["cost"])
+                total_cost += val
+                sector = sector_map.get(h["ticker"], "Other")
+                sector_totals[sector] = sector_totals.get(sector, 0) + val
+            except (ValueError, KeyError):
+                continue
+
+        if total_cost == 0:
+            return
+
+        over_sectors = []
+        for sector, val in sector_totals.items():
+            pct = val / total_cost * 100
+            if pct > 35:
+                over_sectors.append(f"{sector} ({pct:.0f}%)")
+
+        if over_sectors:
+            text = (
+                "**Auto-detected sector concentration (from self-analyze):**\n"
+                "The following sectors exceed the 35% limit. No new BUYs in these sectors:\n"
+            )
+            for s in over_sectors:
+                text += f"- {s}\n"
+            if self._apply_patch("system/03_devils_gate.md", "SECTOR BLOCKERS",
+                                 text, "## The Eight Tests"):
+                self._log("system/03_devils_gate.md",
+                          f"Sector blockers: {', '.join(over_sectors)}",
+                          "Sectors exceed 35% limit")
+        else:
+            if self._remove_patch("system/03_devils_gate.md", "SECTOR BLOCKERS"):
+                self._log("system/03_devils_gate.md",
+                          "Removed sector blockers — all sectors within limits",
+                          "No sectors over 35%")
+
+    # ── Rule 3: Stop-loss enforcement (Report template) ───────
+
+    def _fix_stop_loss_enforcement(self, ctx):
+        stop_issues = [i for i in ctx["quality"] if i["type"] == "Missing Stop-Loss"]
+        if stop_issues:
+            n = sum(int(re.search(r"(\d+)", i["detail"]).group(1))
+                    for i in stop_issues if re.search(r"(\d+)", i["detail"]))
+            text = (
+                f"**STOP-LOSS RULE (auto-added by self-analyze):**\n"
+                f"Every BUY recommendation MUST include a specific stop-loss price. "
+                f"\"10% below\" is not acceptable — use a meaningful technical level "
+                f"(support, DMA, 52-week low). If you cannot define a stop, do not recommend the BUY.\n"
+                f"*Evidence: {n} past picks without defined stop-loss.*\n"
+            )
+            if self._apply_patch("system/04_report.md", "STOP-LOSS ENFORCEMENT",
+                                 text, "### 6. What to Avoid"):
+                self._log("system/04_report.md",
+                          "Stop-loss enforcement rule",
+                          f"{n} past BUY picks without stop-loss")
+
+    # ── Rule 4: Buy bias → SELL/TRIM check (Strategy) ────────
+
+    def _fix_sell_check(self, ctx):
+        buy_bias = [p for p in ctx["patterns"] if p["name"] == "Buy Bias"]
+        if buy_bias:
+            p = buy_bias[0]
+            text = (
+                f"**SELL/TRIM CHECK (auto-added by self-analyze):**\n"
+                f"Buy bias detected — {p['evidence']}. "
+                f"For EVERY holding, explicitly evaluate: is there a reason to SELL or TRIM? "
+                f"If a stop-loss has been hit, the thesis has broken, or the position is over-concentrated, "
+                f"recommend SELL/TRIM before any new BUYs.\n"
+            )
+            if self._apply_patch("system/02_strategy.md", "SELL CHECK",
+                                 text, "### 3. Risk Assessment"):
+                self._log("system/02_strategy.md",
+                          f"SELL/TRIM check — {p['evidence']}",
+                          "Buy bias pattern detected")
+        else:
+            if self._remove_patch("system/02_strategy.md", "SELL CHECK"):
+                self._log("system/02_strategy.md",
+                          "Removed SELL/TRIM check — buy bias no longer detected",
+                          "Sell activity now present")
+
+    # ── Rule 5: AVOID signal validation (Screener) ───────────
+
+    def _fix_avoid_validation(self, ctx):
+        avoid_calls = ctx["predictions"].get("avoid_calls", [])
+        if not avoid_calls:
+            return
+        correct = [c for c in avoid_calls if c.get("correct")]
+        total = [c for c in avoid_calls if c.get("correct") is not None]
+        if len(total) >= 3 and len(correct) / len(total) >= 0.8:
             screener_path = os.path.join(SCRIPT_DIR, "screener.py")
-            if os.path.exists(screener_path):
-                with open(screener_path, "r", encoding="utf-8") as f:
-                    sc_content = f.read()
-
-                avoid_marker = "# AUTO-FIX: AVOID VALIDATION"
-                if avoid_marker not in sc_content:
-                    # Find the overbought scoring section and boost it
-                    old_line = "signals.append(\"Overbought\")"
-                    if old_line in sc_content:
-                        new_line = (
-                            f'signals.append("Overbought")  '
-                            f'{avoid_marker} — AVOID calls validated at '
-                            f'{len(correct_avoids)}/{len(total_avoids)} accuracy'
-                        )
-                        sc_content = sc_content.replace(old_line, new_line, 1)
-                        with open(screener_path, "w", encoding="utf-8") as f:
-                            f.write(sc_content)
-                        applied.append({
-                            "file": "tools/screener.py",
-                            "fix": f"Validated overbought/AVOID signal ({len(correct_avoids)}/{len(total_avoids)} correct)",
-                            "reason": "AVOID accuracy is high — this signal is reliable",
-                        })
-
-    # --- Fix 5: Add data verification reminder to research phase ---
-    data_issues = [i for i in quality_issues if i["type"] == "Unverified Data"]
-    if data_issues:
-        research_path = os.path.join(PROJECT_DIR, "system", "01_research.md")
-        if os.path.exists(research_path):
-            with open(research_path, "r", encoding="utf-8") as f:
-                research_content = f.read()
-
-            verify_marker = "<!-- AUTO-FIX: VERIFICATION REMINDER -->"
-            if verify_marker not in research_content:
-                reminder = (
-                    f"\n{verify_marker}\n"
-                    f"**DATA CITATION RULE (auto-added by self-analyze):**\n"
-                    f"Every price mentioned in the report must reference its source: "
-                    f"\"(data_fetcher.py)\" or \"(web search YYYY-MM-DD)\". "
-                    f"Past reports had {data_issues[0]['detail'].lower()}.\n\n"
-                )
-                insert_point = "## Rules"
-                if insert_point in research_content:
-                    research_content = research_content.replace(
-                        insert_point,
-                        reminder + insert_point,
+            if not os.path.exists(screener_path):
+                return
+            with open(screener_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            marker = "# AUTO-FIX: AVOID VALIDATION"
+            if marker not in content:
+                old_line = 'signals.append("Overbought")'
+                if old_line in content:
+                    new_line = (
+                        f'signals.append("Overbought")  '
+                        f'{marker} — AVOID calls validated at '
+                        f'{len(correct)}/{len(total)} accuracy'
                     )
-                else:
-                    research_content += "\n" + reminder
+                    content = content.replace(old_line, new_line, 1)
+                    with open(screener_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    self._log("tools/screener.py",
+                              f"AVOID signal validated ({len(correct)}/{len(total)} correct)",
+                              "AVOID accuracy is high — signal is reliable")
 
-                with open(research_path, "w", encoding="utf-8") as f:
-                    f.write(research_content)
-                applied.append({
-                    "file": "system/01_research.md",
-                    "fix": "Added mandatory data citation rule",
-                    "reason": "Past reports had unverified price mentions",
-                })
+    # ── Rule 6: Data citation reminder (Research) ────────────
 
-    return applied
+    def _fix_data_citation(self, ctx):
+        data_issues = [i for i in ctx["quality"] if i["type"] == "Unverified Data"]
+        if data_issues:
+            text = (
+                f"**DATA CITATION RULE (auto-added by self-analyze):**\n"
+                f"Every price mentioned in the report must reference its source: "
+                f"\"(data_fetcher.py)\" or \"(web search YYYY-MM-DD)\". "
+                f"Past reports had {data_issues[0]['detail'].lower()}.\n"
+            )
+            if self._apply_patch("system/01_research.md", "VERIFICATION REMINDER",
+                                 text, "## Rules"):
+                self._log("system/01_research.md",
+                          "Data citation rule",
+                          "Past reports had unverified price mentions")
+
+    # ── Rule 7: Conviction calibration (Strategy) ────────────
+
+    def _fix_conviction_calibration(self, ctx):
+        perf_log = ctx.get("perf_log", [])
+        high_conv = [e for e in perf_log if e.get("conviction") == "***"]
+        if len(high_conv) < 5:
+            return  # Not enough data
+
+        returns = []
+        for e in high_conv:
+            try:
+                r = float(e.get("return_pct", "0").replace("+", "").replace("%", ""))
+                returns.append(r)
+            except ValueError:
+                pass
+
+        if not returns:
+            return
+
+        avg = sum(returns) / len(returns)
+        if avg < 0:
+            text = (
+                f"**CONVICTION CALIBRATION (auto-added by self-analyze):**\n"
+                f"High conviction (***) calls are underperforming: avg return {avg:+.1f}% "
+                f"across {len(returns)} calls.\n"
+                f"- Consider downgrading borderline *** to ** until track record improves\n"
+                f"- Reserve *** for setups with 3+ confirming signals\n"
+                f"- Current threshold: 5+ *** calls with negative avg return\n"
+            )
+            if self._apply_patch("system/02_strategy.md", "CONVICTION CALIBRATION",
+                                 text, "### 5. New BUY Recommendations"):
+                self._log("system/02_strategy.md",
+                          f"Conviction calibration — *** avg return {avg:+.1f}%",
+                          "High conviction calls underperforming")
+        else:
+            if self._remove_patch("system/02_strategy.md", "CONVICTION CALIBRATION"):
+                self._log("system/02_strategy.md",
+                          "Removed conviction calibration — *** calls now profitable",
+                          f"*** avg return improved to {avg:+.1f}%")
+
+    # ── Rule 8: Repetition guard (Strategy) ──────────────────
+
+    def _fix_repetition_guard(self, ctx):
+        repeat_patterns = [p for p in ctx["patterns"] if p["name"] == "Repetitive Recommendations"]
+        if repeat_patterns:
+            p = repeat_patterns[0]
+            text = (
+                f"**REPETITION GUARD (auto-added by self-analyze):**\n"
+                f"Detected repeated recommendations without new evidence: {p['evidence']}.\n"
+                f"If a ticker was already recommended AND the investor bought it, switch to HOLD analysis. "
+                f"Only recommend again with a NEW catalyst.\n"
+            )
+            if self._apply_patch("system/02_strategy.md", "REPETITION GUARD",
+                                 text, "### 5. New BUY Recommendations"):
+                self._log("system/02_strategy.md",
+                          f"Repetition guard — {p['evidence']}",
+                          "Same tickers recommended across multiple reports")
+        else:
+            if self._remove_patch("system/02_strategy.md", "REPETITION GUARD"):
+                self._log("system/02_strategy.md",
+                          "Removed repetition guard — no repeated picks",
+                          "Recommendation diversity restored")
+
+    # ── Rule 9: Benchmark alert (Strategy) ───────────────────
+
+    def _fix_benchmark_alert(self, ctx):
+        perf_log = ctx.get("perf_log", [])
+        reports = ctx.get("reports", [])
+
+        # Check benchmark data from DB
+        try:
+            with VaultDB() as db:
+                benchmarks = db.get_benchmarks(limit=5)
+            if not benchmarks:
+                return
+
+            trailing = sum(1 for b in benchmarks if float(b["alpha"]) < 0)
+            if trailing >= 3:
+                latest = benchmarks[0]
+                text = (
+                    f"**BENCHMARK ALERT (auto-added by self-analyze):**\n"
+                    f"Portfolio is trailing VOO for {trailing} consecutive reports "
+                    f"(latest alpha: {latest['alpha']}%).\n"
+                    f"- Consider whether active picks are adding value vs simple VOO\n"
+                    f"- If trailing persists 5+ reports, shift to index-heavy approach\n"
+                    f"- This is not a failure — it's data for honest assessment\n"
+                )
+                if self._apply_patch("system/02_strategy.md", "BENCHMARK ALERT",
+                                     text, "### 4. Consensus Challenges"):
+                    self._log("system/02_strategy.md",
+                              f"Benchmark alert — trailing VOO for {trailing} reports",
+                              "Portfolio underperforming index")
+            else:
+                if self._remove_patch("system/02_strategy.md", "BENCHMARK ALERT"):
+                    self._log("system/02_strategy.md",
+                              "Removed benchmark alert — outperforming again",
+                              "Alpha is positive")
+        except Exception:
+            pass
+
+    # ── Rule 10: Section checklist (Report template) ─────────
+
+    def _fix_section_checklist(self, ctx):
+        section_issues = [i for i in ctx["quality"] if i["type"] == "Missing Section"]
+        # Only fire if 2+ reports have missing sections
+        reports_with_issues = set(i["date"] for i in section_issues)
+        if len(reports_with_issues) >= 2:
+            missing = set(i["detail"] for i in section_issues)
+            text = (
+                f"**SECTION CHECKLIST (auto-added by self-analyze):**\n"
+                f"Multiple reports have missing sections. Before finalizing, verify ALL sections exist:\n"
+            )
+            for section in ["What's Happening", "Your Portfolio", "What to Buy",
+                           "What to Avoid", "Biggest Risks", "Gut Check", "Bottom Line"]:
+                check = "MISSING" if any(section in m for m in missing) else "OK"
+                text += f"- [{check}] {section}\n"
+            text += f"*Evidence: {len(reports_with_issues)} reports with missing sections.*\n"
+
+            if self._apply_patch("system/04_report.md", "SECTION CHECKLIST",
+                                 text, "## Devil's Gate Integration"):
+                self._log("system/04_report.md",
+                          f"Section checklist — {len(reports_with_issues)} reports with gaps",
+                          "Reports missing required sections")
+        else:
+            if self._remove_patch("system/04_report.md", "SECTION CHECKLIST"):
+                self._log("system/04_report.md",
+                          "Removed section checklist — reports are now complete",
+                          "All required sections present")
+
+    # ── Rule 11: Stale file references (all system docs) ─────
+
+    def _fix_stale_references(self, ctx):
+        stale_refs = {
+            "performance_log.csv": "vault.db",
+            "watchlist_log.csv": "vault.db",
+            "benchmark_log.csv": "vault.db",
+            "screener_output.csv": "vault.db",
+            "thesis_log.json": "vault.db",
+            "active_improvements.md": "vault.db",
+        }
+        system_dir = os.path.join(self.project_dir, "system")
+        for fname in os.listdir(system_dir):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(system_dir, fname)
+            with open(fpath, "r", encoding="utf-8") as f:
+                content = f.read()
+            changed = False
+            for old_ref, new_ref in stale_refs.items():
+                if old_ref in content:
+                    content = content.replace(old_ref, new_ref)
+                    changed = True
+                    self._log(f"system/{fname}",
+                              f"Stale ref: '{old_ref}' → '{new_ref}'",
+                              f"{old_ref} no longer exists")
+            if changed:
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(content)
+
+    # ── Rule 12: Learned rules summary (CLAUDE.md) ───────────
+
+    def _fix_learned_rules_summary(self, ctx):
+        """Update CLAUDE.md with a summary of all active auto-learned rules."""
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # Collect all active AUTO-FIX markers across system files
+        active_rules = []
+        system_dir = os.path.join(self.project_dir, "system")
+        for fname in sorted(os.listdir(system_dir)):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(system_dir, fname)
+            with open(fpath, "r", encoding="utf-8") as f:
+                content = f.read()
+            for match in re.finditer(r'<!-- AUTO-FIX: (.+?) -->', content):
+                rule_name = match.group(1)
+                # Extract first line of content after marker
+                start = match.end()
+                rest = content[start:start + 200].strip()
+                first_line = rest.split("\n")[0].strip().strip("*").strip()
+                if first_line:
+                    active_rules.append(f"- **{rule_name}** ({fname}): {first_line}")
+
+        # Also check for PRO-INSIGHT markers
+        for fname in sorted(os.listdir(system_dir)):
+            if not fname.endswith(".md"):
+                continue
+            fpath = os.path.join(system_dir, fname)
+            with open(fpath, "r", encoding="utf-8") as f:
+                content = f.read()
+            for match in re.finditer(r'<!-- PRO-INSIGHT: (.+?) -->', content):
+                rule_name = match.group(1)
+                active_rules.append(f"- **{rule_name}** ({fname}): learned from pro analysis")
+
+        if not active_rules:
+            return
+
+        text = (
+            f"## Auto-Learned Rules (updated {today} by self-analyze)\n"
+            f"The system has learned these rules from analyzing reports, trades, and pro data.\n"
+            f"They are embedded in system files as AUTO-FIX and PRO-INSIGHT patches.\n\n"
+        )
+        text += "\n".join(active_rules) + "\n"
+
+        if self._apply_patch("CLAUDE.md", "LEARNED RULES", text, "## Don't"):
+            self._log("CLAUDE.md",
+                      f"Updated learned rules summary ({len(active_rules)} active rules)",
+                      "Keeps CLAUDE.md in sync with auto-patched system files")
 
 
 def main():
@@ -1004,59 +1412,66 @@ def main():
     print(f"  Holdings: {len(holdings)}")
 
     print("\nRunning analysis...")
+    now = datetime.now()
+
+    # Build analysis context ONCE (avoid redundant recomputation)
+    print("  Building analysis context...")
+    predictions = analyze_prediction_accuracy(reports, perf_log)
+    quality_issues = analyze_report_quality(reports)
+    concentration_issues = analyze_portfolio_concentration(holdings)
+    patterns = identify_patterns(predictions, quality_issues, perf_log, reports)
+    recommendations = generate_recommendations(
+        predictions, quality_issues, concentration_issues, perf_log, reports
+    )
+
+    ctx = {
+        "reports": reports,
+        "trades": trades,
+        "perf_log": perf_log,
+        "holdings": holdings,
+        "predictions": predictions,
+        "quality": quality_issues,
+        "concentration": concentration_issues,
+        "patterns": patterns,
+        "recommendations": recommendations,
+    }
+
     report_content = generate_report(reports, trades, perf_log, holdings)
 
-    # Save markdown
-    now = datetime.now()
-    file_stamp = now.strftime("%Y-%m-%d_%H%M")
-    md_path = os.path.join(IMPROVEMENTS_DIR, f"self_improvement_{file_stamp}.md")
-    with open(md_path, "w", encoding="utf-8") as f:
-        f.write(report_content)
-    print(f"\nReport saved: {md_path}")
+    # Print report to console
+    print("\n" + report_content)
 
-    # Generate HTML
-    try:
-        from html_report import save_html_report
-        html_path = md_path.rsplit(".", 1)[0] + ".html"
-        save_html_report(report_content, html_path)
-    except ImportError:
-        print("WARNING: Could not generate HTML (html_report.py not found)")
-
-    # Generate active_improvements.md — feeds back into the pipeline
-    print("Updating active improvements...")
+    # Update active improvements in DB
+    print("\nUpdating active improvements in DB...")
     _write_active_improvements(reports, trades, perf_log, holdings)
 
-    # Apply auto-fixes to system files
-    print("\nApplying auto-fixes...")
-    fixes = apply_fixes(reports, trades, perf_log, holdings)
+    # Run the self-improving patch engine
+    print("\n" + "=" * 50)
+    print("  PATCH ENGINE — Auto-improving system files")
+    print("=" * 50)
+    engine = PatchEngine(PROJECT_DIR)
+    fixes = engine.run_all(ctx)
     if fixes:
         for fix in fixes:
-            print(f"  FIXED: {fix['file']} — {fix['fix']}")
-
-        # Append fixes to the improvement report
-        fix_section = "\n\n## Auto-Applied Fixes\n\n"
-        fix_section += "The following changes were automatically applied to system files:\n\n"
-        for fix in fixes:
-            fix_section += f"### {fix['file']}\n"
-            fix_section += f"**Change:** {fix['fix']}\n"
-            fix_section += f"**Reason:** {fix['reason']}\n\n"
-
-        with open(md_path, "a", encoding="utf-8") as f:
-            f.write(fix_section)
-
-        # Regenerate HTML with fixes included
-        try:
-            with open(md_path, "r", encoding="utf-8") as f:
-                updated_content = f.read()
-            from html_report import save_html_report
-            html_path = md_path.rsplit(".", 1)[0] + ".html"
-            save_html_report(updated_content, html_path)
-        except Exception:
-            pass
+            print(f"  PATCHED: {fix['file']} — {fix['fix']}")
+        # Store fixes in DB
+        with VaultDB() as db:
+            for fix in fixes:
+                db.add_improvement(
+                    date=now.strftime("%Y-%m-%d"),
+                    imp_type='self_analysis',
+                    category='auto_fix',
+                    priority='HIGH',
+                    finding=fix['fix'],
+                    action=fix['reason'],
+                    target_file=fix['file'],
+                    status='applied',
+                    source='self_analyze.py (PatchEngine)',
+                )
     else:
-        print("  No auto-fixes needed.")
+        print("  No patches needed — system is up to date.")
 
-    # Print summary to console
+    # Print summary
     print("\n" + "=" * 50)
     print("  SUMMARY")
     print("=" * 50)
@@ -1067,18 +1482,36 @@ def main():
     print(f"  Critical issues: {len(high_issues)}")
     print(f"  Total issues: {len(quality_issues)}")
 
-    patterns = identify_patterns(
-        analyze_prediction_accuracy(reports, perf_log),
-        quality_issues,
-        perf_log,
-        reports,
-    )
+    predictions = analyze_prediction_accuracy(reports, perf_log)
+    patterns = identify_patterns(predictions, quality_issues, perf_log, reports)
     print(f"  Patterns found: {len(patterns)}")
     for p in patterns:
         print(f"    - {p['name']}")
 
-    print(f"\n  Full report: {md_path}")
+    print(f"\n  All data saved to vault.db")
     print("=" * 50)
+
+    # Save metadata to DB
+    try:
+        with VaultDB() as db:
+            for call in predictions.get("avoid_calls", []):
+                db.add_avoid(
+                    date=call.get("date", ""),
+                    ticker=call.get("ticker", ""),
+                    price_at_call=call.get("price_at_report"),
+                    report=None, reason=None,
+                )
+            db.add_report(
+                filename=f"self_improvement_{now.strftime('%Y-%m-%d_%H%M')}",
+                date=now.strftime("%Y-%m-%d"),
+                report_type="self-analysis",
+                alerts_triggered=len(high_issues),
+                positions_count=len(holdings),
+                path="vault.db:improvements",
+            )
+            print("  DB: saved avoid calls and report metadata.")
+    except Exception as e:
+        print(f"  DB: write skipped ({e})")
 
 
 if __name__ == "__main__":

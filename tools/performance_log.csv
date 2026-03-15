@@ -1,5 +1,0 @@
-date,ticker,action,entry,stop,target,conviction,status,exit_price,exit_date,return_pct,notes
-2026-03-10,GOOGL,BUY,305,,350,**,OPEN,,,+0.7,First investment - AI + ads + cloud
-2026-03-10,XLE,BUY,56,,62-65,***,OPEN,,,+1.8,Oil crisis = energy profits
-2026-03-10,XLV,BUY,152,,165-170,**,OPEN,,,+2.6,Defensive healthcare play
-2026-03-10,GLD,BUY,470,,510-530,**,OPEN,,,-0.2,Gold as portfolio insurance

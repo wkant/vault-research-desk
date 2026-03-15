@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
 Performance scoring script for the Vault Research Desk.
-Reads performance_log.csv and produces a scorecard with live P&L,
+Reads trades from vault.db and produces a scorecard with live P&L,
 conviction breakdown, holding periods, and benchmark comparison vs VOO.
 """
 
-import csv
 import os
 import sys
 from datetime import datetime, date
@@ -16,26 +15,9 @@ except ImportError:
     print("Error: yfinance is required. Install with: pip install yfinance")
     sys.exit(1)
 
-
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CSV_PATH = os.path.join(SCRIPT_DIR, "performance_log.csv")
-
-
-def read_trades(path):
-    """Read performance_log.csv and return a list of trade dicts."""
-    if not os.path.exists(path):
-        print(f"Error: {path} not found.")
-        sys.exit(1)
-
-    trades = []
-    with open(path, newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            # Skip empty rows
-            if not row.get("ticker"):
-                continue
-            trades.append(row)
-    return trades
+sys.path.insert(0, SCRIPT_DIR)
+from db import VaultDB
 
 
 def parse_date(date_str):
@@ -46,13 +28,34 @@ def parse_date(date_str):
 
 
 def fetch_current_price(ticker):
-    """Fetch the most recent closing price for a ticker via yfinance."""
+    """Fetch the most recent closing price for a ticker via yfinance.
+    Checks DB cache first (15 min freshness) to avoid redundant API calls."""
+    # Check DB cache first
+    try:
+        with VaultDB() as db:
+            cached = db.get_cached_quote(ticker, max_age_minutes=15)
+            if cached and cached.get('price'):
+                return cached['price']
+    except Exception:
+        pass
+
+    # Fall back to yfinance
     try:
         tk = yf.Ticker(ticker)
         hist = tk.history(period="5d")
         if hist.empty:
             return None
-        return float(hist["Close"].iloc[-1])
+        price = float(hist["Close"].iloc[-1])
+
+        # Cache the fetched price in DB for other tools
+        if price is not None:
+            try:
+                with VaultDB() as db:
+                    db.cache_quote(ticker, {'price': price})
+            except Exception:
+                pass
+
+        return price
     except Exception:
         return None
 
@@ -165,7 +168,7 @@ def print_scorecard(trades, voo_returns):
     """Print the formatted scorecard."""
     if not trades:
         print("\n══════ PERFORMANCE SCORECARD ══════")
-        print("  No trades found in performance_log.csv")
+        print("  No trades found in vault.db")
         print("══════════════════════════════════\n")
         return
 
@@ -294,7 +297,24 @@ def print_scorecard(trades, voo_returns):
 
 
 def main():
-    trades_raw = read_trades(CSV_PATH)
+    with VaultDB() as db:
+        db_rows = db.get_all_trades()
+        trades_raw = []
+        for r in db_rows:
+            trades_raw.append({
+                "date": r["date"],
+                "ticker": r["ticker"],
+                "action": r["action"],
+                "entry": str(r["entry_price"]) if r["entry_price"] else "",
+                "stop": str(r["stop_loss"]) if r["stop_loss"] else "",
+                "target": r["target"] or "",
+                "conviction": r["conviction"] or "",
+                "status": r["status"] or "",
+                "exit_price": str(r["exit_price"]) if r["exit_price"] else "",
+                "exit_date": r["exit_date"] or "",
+                "return_pct": str(r["return_pct"]) if r["return_pct"] is not None else "",
+                "notes": r["notes"] or "",
+            })
     if not trades_raw:
         print_scorecard([], [])
         return
@@ -306,6 +326,23 @@ def main():
     voo_returns = compute_benchmark(trades)
 
     print_scorecard(trades, voo_returns)
+
+    # Write trade stats snapshot to DB
+    try:
+        with VaultDB() as db:
+            # Update return_pct for open trades in DB based on live prices
+            for t in trades:
+                if t["status"] == "OPEN" and t["return_pct"] is not None:
+                    try:
+                        db.conn.execute("""
+                            UPDATE trades SET return_pct=?
+                            WHERE ticker=? AND status='OPEN'
+                        """, (round(t["return_pct"], 2), t["ticker"]))
+                    except Exception:
+                        pass
+            db.conn.commit()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

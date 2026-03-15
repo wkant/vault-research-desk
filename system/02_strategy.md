@@ -7,12 +7,18 @@ Take the Research output and produce actionable calls: what to hold, what to buy
 - Phase 1 Research output
 - `tools/data_fetcher.py` output (verified prices, moving averages, RSI, breadth for all relevant tickers)
 - `tools/screener.py` output (ranked candidates with RSI, DMA crossovers, volume signals)
-- `improvements/active_improvements.md` (self-analysis feedback — concentration limits, bias corrections, past mistakes)
+- Active improvements from vault.db (self-analysis feedback — concentration limits, bias corrections, past mistakes)
 - `portfolio.md` (current holdings, cash, risk tolerance, monthly investment)
 - Previous report (for performance review and consistency)
 - `system/05_position_mgmt.md` (rules for sizing, scaling, stops)
+- Smart money signals from vault.db (ARK trades, guru consensus, 13F, insider buys)
 
-**Before making any recommendation, check `active_improvements.md` for:**
+**Before making any recommendation, check active improvements in vault.db for:**
+```python
+from db import VaultDB
+with VaultDB() as db:
+    print(db.get_active_improvements_summary())
+```
 - Positions that are already over-concentrated (do NOT add more)
 - Bias patterns to correct (e.g., if buy bias detected, actively look for SELL/TRIM candidates)
 - Process gaps to fix (e.g., missing stop-losses on prior reports)
@@ -120,13 +126,15 @@ ALL PRICES VERIFIED
 
 <!-- PRO-INSIGHT: SMART MONEY VALIDATION -->
 **SMART MONEY VALIDATION (learned from pro analysis):**
-For every BUY recommendation, consider smart money alignment:
-- If 3+ top institutional funds hold the same name -> positive thesis support (note it)
-- If top funds are actively selling -> red flag (must explain why you disagree)
-- If company insiders are buying their own stock -> strong bullish signal
-- This is a VALIDATOR, not a GENERATOR — never buy just because a fund holds it (13F is 45 days stale)
+For every BUY recommendation, run `smart_money.py check TICKER` and consider:
+- **13F consensus**: If 3+ top institutional funds hold it -> thesis support (note it)
+- **Guru holdings**: If held by Buffett/Ackman/Klarman/etc -> thesis support. If they're reducing -> red flag
+- **ARK trades**: If ARK is accumulating -> growth/innovation signal. If distributing -> caution
+- **Insider buying**: If company insiders are buying their own stock -> strong bullish signal
+- If institutions, gurus, AND insiders are all selling -> FLAG (must explain why you disagree)
+- This is a VALIDATOR, not a GENERATOR — never buy just because a fund holds it
 
-*Sources: Harvard (2022) — insider buying outperforms by 4-8% annually. 13F consensus provides thesis validation.*
+*Sources: Harvard (2022) — insider buying outperforms by 4-8% annually. 13F + guru + ARK consensus provides multi-source thesis validation.*
 
 ## Rules
 - Every pick needs: thesis + entry + stop + target + "what changes my mind"

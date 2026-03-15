@@ -27,6 +27,13 @@ The following tickers are over the 15% single-position limit. Any BUY or BUY MOR
 - GOOGL
 
 <!-- END CONCENTRATION BLOCKERS -->
+
+<!-- AUTO-FIX: SECTOR BLOCKERS -->
+**Auto-detected sector concentration (from self-analyze):**
+The following sectors exceed the 35% limit. No new BUYs in these sectors:
+- Technology (44%)
+
+<!-- END SECTOR BLOCKERS -->
 ## The Eight Tests
 
 Run all eight. Each produces PASS / FLAG / REJECT.
@@ -137,10 +144,13 @@ Post in chat: "Devil's Gate: [status]. Doomsday: [1 sentence]. Questions: [2-3].
 
 <!-- PRO-INSIGHT: SMART MONEY CHALLENGE -->
 **SMART MONEY CHALLENGE (learned from pro analysis):**
-For every BUY recommendation, Devil's Gate should consider:
-- "Are top institutional investors buying or selling this name?"
+For every BUY recommendation, Devil's Gate should check `smart_money.py check TICKER`:
+- "Are top institutional investors (13F) buying or selling?"
+- "Are superinvestors (Buffett, Ackman, etc.) holding or reducing?"
+- "Is ARK accumulating or distributing?"
 - "Are company insiders buying or selling their own stock?"
-- If both institutions AND insiders are selling -> FLAG
+- If ALL four sources are negative (selling/reducing/distributing) -> FLAG
 - If insiders are buying while stock is down -> contrarian bullish signal, reduce FLAG severity
+- If guru consensus + insider buying align -> strong conviction support
 
-*Source: Institutional 13F consensus + insider buying are the two strongest public signals of informed opinion.*
+*Source: 13F + Dataroma guru consensus + ARK daily trades + insider buying — four independent smart money signals.*

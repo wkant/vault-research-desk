@@ -19,7 +19,6 @@ A personal investment research system with 4 analysis phases, adversarial valida
 ```
 vault_research_desk/
 ├── CLAUDE.md                  ← You are here
-├── project_instructions.md    ← Overview and quick start
 ├── portfolio.md               ← SINGLE SOURCE OF TRUTH (investor manages)
 │
 ├── system/                    ← Analysis pipeline (do not modify)
@@ -41,30 +40,29 @@ vault_research_desk/
 │   ├── thesis_tracker.py      ← Track investment theses, detect flip-flops
 │   ├── correlation.py         ← Portfolio correlation matrix + risk score
 │   ├── insider_check.py       ← SEC Form 4 insider buying/selling signals
+│   ├── watchlist_extract.py   ← Auto-extract watchlist picks from reports
+│   ├── db.py                  ← SQLite database module (VaultDB)
+│   ├── news.py                ← News fetcher (Finnhub + Marketaux) + sentiment
+│   ├── smart_money.py         ← ARK daily trades + Dataroma guru holdings
 │   ├── html_report.py         ← Markdown → styled HTML
-│   ├── templates/             ← HTML/CSS templates
-│   │   ├── base.html
-│   │   └── styles.css
-│   ├── performance_log.csv    ← Track every call for scoring
-│   └── screener_output.csv    ← Latest screener results (auto-generated)
+│   └── templates/             ← HTML/CSS templates
+│       ├── base.html
+│       └── styles.css
 │
-├── improvements/              ← Self-analysis reports
-│   └── self_improvement_YYYY-MM-DD.md
+├── vault.db                   ← SQLite database (all structured data)
+│                                 (improvements, research, 13F, news, etc.)
 │
 ├── reports/                   ← Generated analysis reports (weekly history)
 │   ├── report_YYYY-MM-DD.md
 │   ├── report_YYYY-MM-DD.html  ← Default output
 │   └── report_YYYY-MM-DD.pdf   ← On demand
 │
-├── trades/                    ← Actual trade actions taken
-│   └── trade_YYYY-MM-DD.md    ← What was bought/sold, linked to source report
-│
-└── archive_v1/                ← Previous 7-agent system (reference only)
+└── trades/                    ← Actual trade actions (created when trades happen)
+    └── trade_YYYY-MM-DD.md    ← What was bought/sold, linked to source report
 ```
 
 ## Key Files (read in this order)
-1. `project_instructions.md` — Overview and quick start
-2. `system/00_system.md` — Master rules, execution flow, commands
+1. `system/00_system.md` — Master rules, execution flow, commands
 3. `portfolio.md` — **SINGLE SOURCE OF TRUTH** for all investor data
 4. `system/01_research.md` → `system/02_strategy.md` → `system/03_devils_gate.md` → `system/04_report.md`
 5. `system/05_position_mgmt.md` — Scaling, stops, profit-taking rules
@@ -78,13 +76,20 @@ vault_research_desk/
 - **Every phase posts output in chat.** If it's not visible, it didn't happen.
 - **Devil's Gate is mandatory** on `report` and `analyze`. All 8 tests.
 - **Gut Check section is mandatory.** Never skip behavioral coaching.
-- **Track performance** in `tools/performance_log.csv`. Compare vs VOO benchmark every report.
+- **Track performance** in `vault.db`. Compare vs VOO benchmark every report.
 - **Screener is a tool, not an oracle.** Screener output provides candidates — every pick still needs a thesis.
 - **IBKR sync previews by default.** Use `--write` only when confirmed by investor.
 
+## API Keys (set in ~/.zshrc)
+```bash
+export FINNHUB_API_KEY="..."       # News headlines (finnhub.io)
+export MARKETAUX_API_KEY="..."     # News sentiment scores (marketaux.com)
+# StockAnalysis key exists but no public API — web-only
+```
+
 ## Data Pipeline
 ```bash
-python3 tools/data_fetcher.py                    # Full data fetch + breadth
+python3 tools/data_fetcher.py                    # Full data fetch + breadth + news
 python3 tools/data_fetcher.py NVDA LMT           # Add specific candidates
 python3 tools/data_fetcher.py --portfolio-only    # Portfolio only
 ```
@@ -111,6 +116,44 @@ python3 tools/correlation.py                     # Portfolio correlation matrix
 python3 tools/correlation.py --add NVDA          # Test adding a ticker
 python3 tools/insider_check.py GOOGL AAPL        # Check insider activity
 python3 tools/insider_check.py --portfolio       # Check all portfolio holdings
+python3 tools/news.py GOOGL AAPL                 # Fetch news (Finnhub + Marketaux)
+python3 tools/news.py --portfolio                # News for all holdings
+python3 tools/news.py --market                   # General market news
+python3 tools/news.py --sentiment GOOGL          # Sentiment summary (Marketaux scores)
+python3 tools/smart_money.py ark                 # ARK Invest daily trades
+python3 tools/smart_money.py ark --days 30       # ARK trades last 30 days
+python3 tools/smart_money.py gurus               # Top superinvestor holdings (Dataroma)
+python3 tools/smart_money.py gurus BRK psc       # Specific gurus (Buffett, Ackman)
+python3 tools/smart_money.py consensus           # Tickers held by 2+ gurus
+python3 tools/smart_money.py check GOOGL         # Full smart money check (all sources)
+```
+
+## Database
+```bash
+python3 tools/db.py dashboard            # Portfolio overview with live P&L
+python3 tools/db.py consensus            # Institutional consensus holdings
+python3 tools/db.py smart-money GOOGL    # Full smart money signal for a ticker
+python3 tools/db.py export               # Dump all tables to CSV (human-readable)
+```
+
+**In code:**
+```python
+from db import VaultDB
+with VaultDB() as db:
+    db.portfolio_dashboard()       # Holdings + prices + P&L in one query
+    db.risk_dashboard()            # Concentration, drawdown, circuit breaker
+    db.smart_money_check("GOOGL")  # Institutional + insider + consensus
+    db.get_consensus(min_funds=3)  # Tickers held by 3+ top funds
+    db.get_cached_quote("GOOGL")   # Price from cache (avoids API calls)
+    db.watchlist_performance()     # How watchlist picks are doing
+    db.get_cluster_buys()          # Insider cluster buy signals
+    db.get_ark_trades(days=30)     # ARK daily trades
+    db.get_ark_conviction("TSLA") # ARK accumulating or distributing?
+    db.get_guru_consensus(min_gurus=2)  # Tickers held by 2+ superinvestors
+    db.get_cached_news("GOOGL")   # Cached news articles
+    db.get_recent_news(days=7)    # All recent news
+    db.get_active_improvements()  # Current issues from self-analyze
+    db.get_improvements('learn_from_pros')  # Pro learnings history
 ```
 
 ## Portfolio Sync
@@ -125,6 +168,24 @@ python3 tools/html_report.py reports/report_YYYY-MM-DD.md   # Markdown → HTML 
 # PDF: generated via ReportLab inline (requires: pip3 install reportlab)
 ```
 
+
+<!-- AUTO-FIX: LEARNED RULES -->
+## Auto-Learned Rules (updated 2026-03-15 by self-analyze)
+The system has learned these rules from analyzing reports, trades, and pro data.
+They are embedded in system files as AUTO-FIX and PRO-INSIGHT patches.
+
+- **VERIFICATION REMINDER** (01_research.md): DATA CITATION RULE (auto-added by self-analyze):
+- **SELL CHECK** (02_strategy.md): SELL/TRIM CHECK (auto-added by self-analyze):
+- **CONCENTRATION BLOCKERS** (03_devils_gate.md): Auto-detected concentration blockers (from self-analyze):
+- **SECTOR BLOCKERS** (03_devils_gate.md): Auto-detected sector concentration (from self-analyze):
+- **STOP-LOSS ENFORCEMENT** (04_report.md): STOP-LOSS RULE (auto-added by self-analyze):
+- **CONVICTION SIZING** (00_system.md): learned from pro analysis
+- **BUSINESS CYCLE MAPPING** (01_research.md): learned from pro analysis
+- **SMART MONEY VALIDATION** (02_strategy.md): learned from pro analysis
+- **SMART MONEY CHALLENGE** (03_devils_gate.md): learned from pro analysis
+- **PORTFOLIO-LEVEL RISK** (05_position_mgmt.md): learned from pro analysis
+
+<!-- END LEARNED RULES -->
 ## Don't
 - Don't hardcode investor data in system files — read from portfolio.md
 - Don't fabricate sentiment indicators you can't verify
