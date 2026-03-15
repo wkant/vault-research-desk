@@ -600,8 +600,7 @@ def check_insider_activity(ticker: str, days: int = None) -> dict:
                 t["filing_date"] = filing["filingDate"]
             all_transactions.extend(txns)
         except Exception as e:
-            # Skip individual filing failures silently
-            pass
+            print(f"  Warning: could not parse filing {acc}: {e}", file=sys.stderr)
 
         time.sleep(REQUEST_DELAY)
 
@@ -638,8 +637,8 @@ def check_insider_activity(ticker: str, days: int = None) -> dict:
                     filing_date=t.get("filing_date"),
                     source="SEC EDGAR Form 4",
                 )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  Warning: could not save insider transactions to DB: {e}", file=sys.stderr)
 
     return result
 

@@ -249,6 +249,9 @@ def _merge_articles(finnhub_articles, marketaux_articles):
 
 def fetch_company_news(ticker, days_back=7):
     """Fetch from both APIs and merge."""
+    if not FINNHUB_API_KEY and not MARKETAUX_API_KEY:
+        print(f"  Warning: no API keys set — cannot fetch news for {ticker}", file=sys.stderr)
+        return []
     fh = _finnhub_company(ticker, days_back)
     mx = _marketaux_company(ticker, days_back)
     return _merge_articles(fh, mx)
@@ -256,6 +259,9 @@ def fetch_company_news(ticker, days_back=7):
 
 def fetch_market_news(days_back=3):
     """Fetch market news from both APIs and merge."""
+    if not FINNHUB_API_KEY and not MARKETAUX_API_KEY:
+        print("  Warning: no API keys set — cannot fetch market news", file=sys.stderr)
+        return []
     fh = _finnhub_market()
     mx = _marketaux_market(days_back)
     return _merge_articles(fh, mx)

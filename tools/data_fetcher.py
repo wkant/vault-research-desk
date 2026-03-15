@@ -187,8 +187,8 @@ def fetch_quote(ticker):
         try:
             with VaultDB() as db:
                 db.cache_quote(ticker, result)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  Warning: could not cache quote for {ticker}: {e}", file=sys.stderr)
 
         return result
     except Exception as e:
@@ -231,11 +231,12 @@ def fetch_technicals(ticker):
         try:
             with VaultDB() as db:
                 db.cache_technicals(ticker, result)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  Warning: could not cache technicals for {ticker}: {e}", file=sys.stderr)
 
         return result
-    except Exception:
+    except Exception as e:
+        print(f"  Warning: could not fetch technicals for {ticker}: {e}", file=sys.stderr)
         return {}
 
 
@@ -491,12 +492,12 @@ def main():
         except Exception as e:
             print(f"  Could not run alerts: {e}")
 
-    # --- Log benchmark to CSV ---
+    # --- Log benchmark to DB ---
     if not portfolio_only and port_tickers:
         try:
             _log_benchmark(total_value, total_cost)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  Warning: could not log benchmark: {e}", file=sys.stderr)
 
     # --- News fetch (Finnhub) ---
     # Check api_keys.conf as fallback for FINNHUB key
@@ -616,8 +617,8 @@ def main():
                         rsi=rsi if isinstance(rsi, (int, float)) else None,
                         rank=rank,
                     )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  Warning: could not sync to DB: {e}", file=sys.stderr)
 
     print(f"\n{'=' * 60}")
     print(f"  Data fetch complete. {datetime.now().strftime('%H:%M:%S')}")
@@ -664,8 +665,8 @@ def _log_benchmark(portfolio_value, portfolio_cost):
         with VaultDB() as db:
             db.add_benchmark(today, portfolio_value, portfolio_pct,
                              voo_price, voo_pct, alpha)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  Warning: could not save benchmark: {e}", file=sys.stderr)
 
 
 if __name__ == '__main__':

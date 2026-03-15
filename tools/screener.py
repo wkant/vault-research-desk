@@ -310,7 +310,7 @@ def print_section(title, results, columns="default"):
         print(header)
         print(f"  {'─' * 52}")
         for r in results:
-            print(f"  {r['ticker']:<8} {r['price']:>9.2f} {r['volume']:>12,} {r.get('avg_vol_4d', 0):>12,} {r['volume_ratio']:>6.1f}x")
+            print(f"  {r['ticker']:<8} {r['price']:>9.2f} {r['volume']:>12,} {r.get('avg_volume_4d', 0):>12,} {r['volume_ratio']:>6.1f}x")
 
 
 def print_results(all_results, top_n):
@@ -440,8 +440,8 @@ def main():
                     'sector': r.get('sector'),
                 })
             db.save_screener_run(db_results)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Warning: could not save screener results to DB: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

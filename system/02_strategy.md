@@ -74,7 +74,7 @@ Three scenarios: bull, base, bear. With specific trigger for each.
 
 <!-- AUTO-FIX: REPETITION GUARD -->
 **REPETITION GUARD (auto-added by self-analyze):**
-Detected repeated recommendations without new evidence: GLD (2x), GOOGL (2x).
+Detected repeated recommendations without new evidence: GOOGL (2x), GLD (2x).
 If a ticker was already recommended AND the investor bought it, switch to HOLD analysis. Only recommend again with a NEW catalyst.
 
 <!-- END REPETITION GUARD -->

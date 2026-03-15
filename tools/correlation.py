@@ -134,6 +134,11 @@ def compute_correlation_matrix(tickers, returns_map):
     if HAS_NUMPY:
         # Align lengths to shortest series
         min_len = min(len(returns_map[t]) for t in tickers)
+        if min_len < 3:
+            print("WARNING: Not enough overlapping data points for reliable correlations.", file=sys.stderr)
+            for i in range(n):
+                matrix[i][i] = 1.0
+            return matrix
         data = np.array([returns_map[t][:min_len] for t in tickers])
         corr = np.corrcoef(data)
         for i in range(n):

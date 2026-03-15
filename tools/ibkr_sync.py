@@ -327,6 +327,13 @@ def main() -> None:
     _print_preview(args.csv_file, fmt, positions, old_holdings)
 
     if args.write:
+        # Safety: create backup before overwriting
+        if os.path.exists(PORTFOLIO_PATH):
+            import shutil
+            backup_path = PORTFOLIO_PATH + ".backup"
+            shutil.copy2(PORTFOLIO_PATH, backup_path)
+            print(f"Backup saved: {os.path.basename(backup_path)}")
+
         md = _build_portfolio_md(positions, settings_text, profile_text, notes_text)
         with open(PORTFOLIO_PATH, "w", encoding="utf-8") as f:
             f.write(md)

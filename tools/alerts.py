@@ -146,8 +146,8 @@ def check_alert(description):
             cached = db.get_cached_quote(ticker, max_age_minutes=15)
             if cached and cached.get('price'):
                 quote = {'price': cached['price']}
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  Warning: DB cache read failed for {ticker}: {e}", file=sys.stderr)
 
     if quote is None:
         quote = fetch_quote(ticker)
@@ -300,7 +300,8 @@ def check_portfolio_health():
                 cached = db.get_cached_quote(ticker, max_age_minutes=15)
                 if cached and cached.get('price'):
                     cached_quotes[ticker] = cached['price']
-    except Exception:
+    except Exception as e:
+        print(f"  Warning: DB cache read failed: {e}", file=sys.stderr)
         cached_quotes = {}
 
     # --- Drawdown circuit breaker ---
