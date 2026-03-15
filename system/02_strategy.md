@@ -71,6 +71,13 @@ Three scenarios: bull, base, bear. With specific trigger for each.
 - Challenge your own picks: what's the strongest counter-argument?
 - Flag any correlation risk between positions
 
+
+<!-- AUTO-FIX: REPETITION GUARD -->
+**REPETITION GUARD (auto-added by self-analyze):**
+Detected repeated recommendations without new evidence: GLD (2x), GOOGL (2x).
+If a ticker was already recommended AND the investor bought it, switch to HOLD analysis. Only recommend again with a NEW catalyst.
+
+<!-- END REPETITION GUARD -->
 ### 5. New BUY Recommendations (3-5 picks max)
 **Candidate sourcing:** If screener output is available, use it as a starting point. Screener flags (RSI extremes, golden crosses, volume spikes) provide quantitative support but are not sufficient alone — every pick still requires a fundamental thesis.
 

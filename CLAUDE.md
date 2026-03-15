@@ -107,7 +107,7 @@ python3 tools/scorer.py                          # Performance scorecard
 python3 tools/alerts.py                          # Check alert conditions
 python3 tools/alerts.py reports/report_2026-03-11.md  # Check specific report
 python3 tools/self_analyze.py                    # Self-improvement analysis
-python3 tools/learn_from_pros.py                 # Fetch 13F data, learn, improve system
+python3 tools/learn_from_pros.py                 # Fetch 13F data (16 funds), learn, improve system
 python3 tools/learn_from_pros.py --cleanup       # Delete fetched data after learning
 python3 tools/thesis_tracker.py                  # Show all active theses
 python3 tools/thesis_tracker.py extract reports/report_YYYY-MM-DD.md  # Extract theses from report
@@ -176,6 +176,7 @@ They are embedded in system files as AUTO-FIX and PRO-INSIGHT patches.
 
 - **VERIFICATION REMINDER** (01_research.md): DATA CITATION RULE (auto-added by self-analyze):
 - **SELL CHECK** (02_strategy.md): SELL/TRIM CHECK (auto-added by self-analyze):
+- **REPETITION GUARD** (02_strategy.md): REPETITION GUARD (auto-added by self-analyze):
 - **CONCENTRATION BLOCKERS** (03_devils_gate.md): Auto-detected concentration blockers (from self-analyze):
 - **SECTOR BLOCKERS** (03_devils_gate.md): Auto-detected sector concentration (from self-analyze):
 - **STOP-LOSS ENFORCEMENT** (04_report.md): STOP-LOSS RULE (auto-added by self-analyze):

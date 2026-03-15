@@ -528,6 +528,57 @@ def main():
         except Exception as e:
             print(f"  News fetch error: {e}")
 
+    # --- Finnhub: Analyst Recommendations + Earnings ---
+    if _finnhub_key:
+        print(f"\n{'─' * 40}")
+        print("ANALYST RECOMMENDATIONS (Finnhub)")
+        print(f"{'─' * 40}")
+        all_rec_tickers = list(set(port_tickers + extra_tickers))
+        for t in all_rec_tickers:
+            try:
+                from urllib.request import Request, urlopen
+                import json as _json
+                url = f"https://finnhub.io/api/v1/stock/recommendation?symbol={t}&token={_finnhub_key}"
+                req = Request(url, headers={"Accept": "application/json"})
+                with urlopen(req, timeout=10) as resp:
+                    recs = _json.loads(resp.read())
+                if recs and len(recs) > 0:
+                    latest = recs[0]
+                    total = latest.get('strongBuy',0) + latest.get('buy',0) + latest.get('hold',0) + latest.get('sell',0) + latest.get('strongSell',0)
+                    if total > 0:
+                        bull = latest.get('strongBuy',0) + latest.get('buy',0)
+                        bear = latest.get('sell',0) + latest.get('strongSell',0)
+                        print(f"  {t}: {latest.get('strongBuy',0)} Strong Buy, {latest.get('buy',0)} Buy, "
+                              f"{latest.get('hold',0)} Hold, {latest.get('sell',0)} Sell "
+                              f"({latest.get('period','')[:7]}) — {'BULLISH' if bull > bear else 'MIXED' if bull == bear else 'BEARISH'}")
+            except Exception as e:
+                print(f"  {t}: error — {e}")
+
+        # Earnings calendar (next 30 days)
+        print(f"\n{'─' * 40}")
+        print("EARNINGS CALENDAR (next 30 days)")
+        print(f"{'─' * 40}")
+        try:
+            from urllib.request import Request, urlopen
+            import json as _json
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            future_str = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+            url = f"https://finnhub.io/api/v1/calendar/earnings?from={today_str}&to={future_str}&token={_finnhub_key}"
+            req = Request(url, headers={"Accept": "application/json"})
+            with urlopen(req, timeout=15) as resp:
+                cal = _json.loads(resp.read())
+            if cal and "earningsCalendar" in cal:
+                relevant = [e for e in cal["earningsCalendar"]
+                           if e.get("symbol") in set(port_tickers + extra_tickers)]
+                if relevant:
+                    for e in sorted(relevant, key=lambda x: x.get("date", "")):
+                        est = f"EPS est: ${e['epsEstimate']:.2f}" if e.get('epsEstimate') else "no estimate"
+                        print(f"  {e['date']}  {e['symbol']:6s}  {est}  ⚠️ EARNINGS")
+                else:
+                    print("  No portfolio/candidate earnings in next 30 days.")
+        except Exception as e:
+            print(f"  Earnings calendar error: {e}")
+
     # --- Sync to DB ---
     try:
         with VaultDB() as db:

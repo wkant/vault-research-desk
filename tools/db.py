@@ -1277,14 +1277,15 @@ class VaultDB:
         ).fetchall()
 
     def clear_improvements(self, imp_type=None):
-        """Mark all active improvements of a type as obsolete (before re-generating)."""
+        """Delete previous active improvements of a type before re-generating.
+        Keeps 'applied' rows for history. Deletes 'active' and 'obsolete' to prevent bloat."""
         if imp_type:
             self.conn.execute(
-                "UPDATE improvements SET status='obsolete' WHERE type=? AND status='active'",
+                "DELETE FROM improvements WHERE type=? AND status IN ('active', 'obsolete')",
                 (imp_type,))
         else:
             self.conn.execute(
-                "UPDATE improvements SET status='obsolete' WHERE status='active'")
+                "DELETE FROM improvements WHERE status IN ('active', 'obsolete')")
         self.conn.commit()
 
     def get_active_improvements_summary(self):

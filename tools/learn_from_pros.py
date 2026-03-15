@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
-learn_from_pros.py — One-time learning tool
+learn_from_pros.py — Multi-source learning tool
 
-Fetches public hedge fund 13F data from SEC EDGAR, analyzes patterns,
+Fetches data from ALL available pro sources, analyzes patterns,
 extracts rules, and patches system files with improvements.
+
+Sources:
+  1. SEC 13F filings (16 hedge funds — quarterly)
+  2. ARK Invest daily trades (arkfunds.io — daily)
+  3. Superinvestor holdings (Dataroma — quarterly)
+  4. Analyst recommendations (Finnhub — monthly)
+  5. Insider transactions (Finnhub — daily)
 
 Run once → learn → patch system → done.
 
 Usage:
-    python3 tools/learn_from_pros.py              # fetch, analyze, apply
+    python3 tools/learn_from_pros.py              # fetch ALL sources, analyze, apply
     python3 tools/learn_from_pros.py --analyze    # analyze cached data only
     python3 tools/learn_from_pros.py --apply      # apply improvements only
     python3 tools/learn_from_pros.py --cleanup    # clear DB tables
@@ -21,7 +28,7 @@ import re
 import time
 import gzip
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from xml.etree import ElementTree as ET
@@ -36,6 +43,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # ── Top funds to study (SEC EDGAR CIK numbers) ──────────────────────
 FUNDS = {
+    # Original 8
     "Berkshire Hathaway": "1067983",
     "Bridgewater Associates": "1350694",
     "Renaissance Technologies": "1037389",
@@ -44,6 +52,15 @@ FUNDS = {
     "Appaloosa Management": "1656456",
     "Citadel Advisors": "1423053",
     "Two Sigma": "1179392",
+    # Added 8
+    "Duquesne Family Office": "1536411",      # Druckenmiller
+    "Tiger Global": "1167483",
+    "Baupost Group": "1061768",               # Klarman
+    "Third Point": "1040273",                 # Loeb
+    "Coatue Management": "1135730",
+    "Viking Global": "1103804",
+    "Lone Pine Capital": "1061165",
+    "Greenlight Capital": "1079114",           # Einhorn
 }
 
 HEADERS = {
@@ -217,8 +234,9 @@ def analyze_fund(name: str, holdings: list, filing_date: str = "") -> dict:
     }
 
 
-def extract_patterns(analyses: list) -> dict:
-    """Extract common patterns across all analyzed funds."""
+def extract_patterns(analyses: list, extra_data: dict = None) -> dict:
+    """Extract common patterns across ALL data sources (not just 13F)."""
+    extra = extra_data or {}
     valid = [a for a in analyses if a]
     if not valid:
         return {}
@@ -242,7 +260,7 @@ def extract_patterns(analyses: list) -> dict:
     concentrated = [a["name"] for a in valid if a["top5_pct"] > 50]
     diversified = [a["name"] for a in valid if a["num_positions"] > 500]
 
-    return {
+    result = {
         "num_funds": len(valid),
         "avg_positions": round(avg_positions),
         "position_range": (min_pos, max_pos),
@@ -254,6 +272,33 @@ def extract_patterns(analyses: list) -> dict:
         "diversified_funds": diversified,
         "fund_details": valid,
     }
+
+    # Merge extra data sources into patterns
+    if extra.get("ark_trades"):
+        trades = extra["ark_trades"]
+        buys = [t for t in trades if t.get("direction") == "Buy"]
+        sells = [t for t in trades if t.get("direction") == "Sell"]
+        buy_tickers = Counter(t["ticker"] for t in buys)
+        sell_tickers = Counter(t["ticker"] for t in sells)
+        result["ark"] = {
+            "total_trades": len(trades),
+            "buys": len(buys),
+            "sells": len(sells),
+            "top_buys": buy_tickers.most_common(10),
+            "top_sells": sell_tickers.most_common(10),
+            "net_direction": "ACCUMULATING" if len(buys) > len(sells) else "DISTRIBUTING" if len(sells) > len(buys) else "NEUTRAL",
+        }
+
+    if extra.get("analyst_summary"):
+        result["analyst"] = extra["analyst_summary"]
+
+    if extra.get("insider_summary"):
+        result["insider"] = extra["insider_summary"]
+
+    if extra.get("guru_data"):
+        result["gurus"] = extra["guru_data"]
+
+    return result
 
 
 # ── Improvement Generation ──────────────────────────────────────────
@@ -396,6 +441,111 @@ def generate_improvements(patterns: dict) -> list:
         ),
         "applies_to": "system/03_devils_gate.md",
     })
+
+    # ── Data-driven improvements from live sources ──────────────
+
+    # 10. ARK trading patterns
+    ark = patterns.get("ark", {})
+    if ark:
+        top_buys = ark.get("top_buys", [])
+        top_sells = ark.get("top_sells", [])
+        if top_buys:
+            buy_str = ", ".join(f"{t}({c}x)" for t, c in top_buys[:5])
+            improvements.append({
+                "area": "ark_signals",
+                "finding": (
+                    f"ARK Invest (30-day): {ark['total_trades']} trades, "
+                    f"{ark['buys']} buys / {ark['sells']} sells = {ark['net_direction']}. "
+                    f"Top accumulation: {buy_str}."
+                ),
+                "recommendation": (
+                    "ARK conviction buys (3+ purchases of same ticker in 30 days) are a growth signal. "
+                    "Cross-reference with portfolio candidates. ARK sells = they're giving up on thesis."
+                ),
+                "applies_to": "system/02_strategy.md",
+            })
+
+    # 11. Analyst consensus for portfolio holdings
+    analyst = patterns.get("analyst", {})
+    if analyst:
+        bullish = [t for t, d in analyst.items() if d.get("signal") == "BULLISH"]
+        bearish = [t for t, d in analyst.items() if d.get("signal") == "BEARISH"]
+        mixed = [t for t, d in analyst.items() if d.get("signal") == "MIXED"]
+        if bullish or bearish:
+            improvements.append({
+                "area": "analyst_consensus",
+                "finding": (
+                    f"Wall Street analyst consensus: "
+                    f"{len(bullish)} BULLISH ({', '.join(bullish[:5])})"
+                    + (f", {len(bearish)} BEARISH ({', '.join(bearish)})" if bearish else "")
+                    + (f", {len(mixed)} MIXED ({', '.join(mixed)})" if mixed else "")
+                    + "."
+                ),
+                "recommendation": (
+                    "Analyst consensus is a thesis validator (not generator). "
+                    "If analysts are BEARISH on a BUY candidate → FLAG in Devil's Gate. "
+                    "Unanimous BULLISH = crowded trade risk."
+                ),
+                "applies_to": "system/03_devils_gate.md",
+            })
+
+    # 12. Insider activity patterns
+    insider = patterns.get("insider", {})
+    if insider:
+        net_buys = [t for t, d in insider.items() if d.get("net") == "NET BUY"]
+        heavy_sells = [t for t, d in insider.items() if d.get("sells", 0) > 20]
+        if net_buys:
+            improvements.append({
+                "area": "insider_buying_signal",
+                "finding": (
+                    f"Insider net buying detected: {', '.join(net_buys)}. "
+                    "Insider buying outperforms by 4-8% annually (Harvard 2022)."
+                ),
+                "recommendation": (
+                    f"Insider buying in {', '.join(net_buys)} = strong bullish signal. "
+                    "Consider as thesis support in Strategy phase."
+                ),
+                "applies_to": "system/02_strategy.md",
+            })
+        if heavy_sells:
+            sell_details = ", ".join(
+                f"{t}({insider[t]['sells']} sells)" for t in heavy_sells
+            )
+            improvements.append({
+                "area": "insider_selling_alert",
+                "finding": (
+                    f"Heavy insider selling (>20 transactions/90 days): {sell_details}. "
+                    "Note: most insider selling is routine (exec comp, 10b5-1 plans). "
+                    "Cluster selling by multiple C-suite = genuine warning."
+                ),
+                "recommendation": (
+                    "Flag heavy insider selling in Devil's Gate. If selling is routine "
+                    "(single exec, regular schedule) → ignore. If cluster (3+ insiders) → RED FLAG."
+                ),
+                "applies_to": "system/03_devils_gate.md",
+            })
+
+    # 13. Guru consensus for portfolio holdings
+    # Check if portfolio tickers are held by multiple gurus
+    guru_data = patterns.get("gurus", {})
+    if guru_data:
+        with VaultDB() as db:
+            guru_consensus = db.get_guru_consensus(min_gurus=2)
+        if guru_consensus:
+            top_consensus = [(r['ticker'], r['guru_count']) for r in guru_consensus[:10]]
+            consensus_str = ", ".join(f"{t}({c} gurus)" for t, c in top_consensus)
+            improvements.append({
+                "area": "guru_consensus",
+                "finding": (
+                    f"Superinvestor consensus (held by 2+ gurus): {consensus_str}."
+                ),
+                "recommendation": (
+                    "Guru consensus is a strong thesis validator. "
+                    "If Buffett + Ackman + Klarman all hold it → high confidence. "
+                    "Use as tiebreaker between similar candidates."
+                ),
+                "applies_to": "system/02_strategy.md",
+            })
 
     return improvements
 
@@ -678,6 +828,7 @@ def main():
         return
 
     all_analyses = []
+    extra_data = {}  # Collects ARK, analyst, insider, guru data for learning
 
     if not args.apply:
         if not args.analyze:
@@ -751,6 +902,159 @@ def main():
                         )
 
                 time.sleep(0.15)  # Rate limiting
+
+            # ── STEP 1b: Fetch ARK daily trades ───────────────────
+            print("\n" + "=" * 60)
+            print("STEP 1b: Fetching ARK Invest daily trades")
+            print("=" * 60)
+            try:
+                from smart_money import fetch_all_ark_trades
+                ark_trades = fetch_all_ark_trades(days=30)
+                if ark_trades:
+                    with VaultDB() as db:
+                        db.cache_ark_trades(ark_trades)
+                    # Analyze ARK patterns
+                    ark_buys = [t for t in ark_trades if t.get("direction") == "Buy"]
+                    ark_sells = [t for t in ark_trades if t.get("direction") == "Sell"]
+                    buy_tickers = Counter(t["ticker"] for t in ark_buys)
+                    sell_tickers = Counter(t["ticker"] for t in ark_sells)
+                    print(f"\n  Total: {len(ark_trades)} trades (30 days)")
+                    print(f"  Buys: {len(ark_buys)} | Sells: {len(ark_sells)}")
+                    if buy_tickers:
+                        top_buys = buy_tickers.most_common(5)
+                        print(f"  Top buys: {', '.join(f'{t}({c})' for t,c in top_buys)}")
+                    if sell_tickers:
+                        top_sells = sell_tickers.most_common(5)
+                        print(f"  Top sells: {', '.join(f'{t}({c})' for t,c in top_sells)}")
+                    extra_data["ark_trades"] = ark_trades
+                else:
+                    print("  No ARK trades fetched")
+            except Exception as e:
+                print(f"  ARK fetch error: {e}")
+
+            # ── STEP 1c: Fetch Guru holdings (Dataroma) ───────────
+            print("\n" + "=" * 60)
+            print("STEP 1c: Fetching superinvestor holdings (Dataroma)")
+            print("=" * 60)
+            try:
+                from smart_money import fetch_guru_holdings, DEFAULT_GURUS
+                guru_data = {}
+                with VaultDB() as db:
+                    for code, name in DEFAULT_GURUS.items():
+                        # Check cache (7-day TTL for quarterly data)
+                        cached = db.get_guru_holdings(guru_code=code)
+                        if cached:
+                            cached_at = datetime.fromisoformat(cached[0]["cached_at"])
+                            age_days = (datetime.now() - cached_at).total_seconds() / 86400
+                            if age_days < 7:
+                                guru_data[name] = len(cached)
+                                print(f"  {name}: {len(cached)} holdings (cached)")
+                                continue
+
+                        holdings, guru_name, quarter = fetch_guru_holdings(code)
+                        if holdings:
+                            db.cache_guru_holdings(code, guru_name or name, holdings, quarter)
+                            guru_data[guru_name or name] = len(holdings)
+                            print(f"  {guru_name or name}: {len(holdings)} holdings ({quarter})")
+                        else:
+                            print(f"  {name}: no data")
+                        time.sleep(0.5)  # Be polite to Dataroma
+                extra_data["guru_data"] = guru_data
+                print(f"\n  Total gurus: {len(guru_data)}")
+            except Exception as e:
+                print(f"  Guru fetch error: {e}")
+
+            # ── STEP 1d: Fetch Analyst Recommendations (Finnhub) ──
+            print("\n" + "=" * 60)
+            print("STEP 1d: Fetching analyst recommendations (Finnhub)")
+            print("=" * 60)
+            try:
+                from news import _load_api_keys
+                keys = _load_api_keys()
+                finnhub_key = os.environ.get("FINNHUB_API_KEY") or keys.get("FINNHUB_API_KEY", "")
+                if finnhub_key:
+                    # Get portfolio + common tickers
+                    with VaultDB() as db:
+                        port_holdings = db.get_holdings()
+                    port_tickers = [h["ticker"] for h in port_holdings]
+                    # Add consensus tickers
+                    check_tickers = list(set(port_tickers + ["XOM", "NVDA", "AMZN", "MSFT", "AAPL", "META", "LMT", "XLU"]))
+
+                    from urllib.request import Request as Req, urlopen as uopen
+                    analyst_summary = {}
+                    for ticker in check_tickers:
+                        try:
+                            url = f"https://finnhub.io/api/v1/stock/recommendation?symbol={ticker}&token={finnhub_key}"
+                            req = Req(url, headers={"Accept": "application/json"})
+                            with uopen(req, timeout=10) as resp:
+                                recs = json.loads(resp.read())
+                            if recs:
+                                r = recs[0]
+                                bull = r.get('strongBuy', 0) + r.get('buy', 0)
+                                bear = r.get('sell', 0) + r.get('strongSell', 0)
+                                hold = r.get('hold', 0)
+                                total = bull + bear + hold
+                                signal = 'BULLISH' if bull > bear else 'MIXED' if bull == bear else 'BEARISH'
+                                analyst_summary[ticker] = {
+                                    'strong_buy': r.get('strongBuy', 0),
+                                    'buy': r.get('buy', 0),
+                                    'hold': hold,
+                                    'sell': r.get('sell', 0),
+                                    'strong_sell': r.get('strongSell', 0),
+                                    'signal': signal,
+                                    'period': r.get('period', ''),
+                                }
+                                print(f"  {ticker}: {bull} bullish / {hold} hold / {bear} bearish — {signal}")
+                        except Exception:
+                            pass
+                    extra_data["analyst_summary"] = analyst_summary
+                    print(f"\n  Checked {len(analyst_summary)} tickers")
+                else:
+                    print("  No FINNHUB_API_KEY — skipping")
+            except Exception as e:
+                print(f"  Analyst rec error: {e}")
+
+            # ── STEP 1e: Fetch Insider Transactions (Finnhub) ─────
+            print("\n" + "=" * 60)
+            print("STEP 1e: Fetching insider transactions (Finnhub)")
+            print("=" * 60)
+            try:
+                if finnhub_key:
+                    from urllib.request import Request as Req, urlopen as uopen
+                    insider_summary = {}
+                    for ticker in check_tickers:
+                        try:
+                            from_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+                            to_date = datetime.now().strftime("%Y-%m-%d")
+                            url = (f"https://finnhub.io/api/v1/stock/insider-transactions"
+                                   f"?symbol={ticker}&from={from_date}&to={to_date}&token={finnhub_key}")
+                            req = Req(url, headers={"Accept": "application/json"})
+                            with uopen(req, timeout=10) as resp:
+                                data = json.loads(resp.read())
+                            txns = data.get("data", [])
+                            if txns:
+                                buys = [t for t in txns if t.get("transactionCode") == "P"]
+                                sells = [t for t in txns if t.get("transactionCode") == "S"]
+                                if buys or sells:
+                                    insider_summary[ticker] = {
+                                        'buys': len(buys),
+                                        'sells': len(sells),
+                                        'net': 'NET BUY' if len(buys) > len(sells) else 'NET SELL',
+                                    }
+                                    print(f"  {ticker}: {len(buys)} buys, {len(sells)} sells — "
+                                          f"{'NET BUY' if len(buys) > len(sells) else 'NET SELL'}")
+                        except Exception:
+                            pass
+                    if insider_summary:
+                        extra_data["insider_summary"] = insider_summary
+                    else:
+                        print("  No significant insider activity found")
+                    print(f"\n  Checked {len(check_tickers)} tickers")
+                else:
+                    print("  No FINNHUB_API_KEY — skipping")
+            except Exception as e:
+                print(f"  Insider fetch error: {e}")
+
         else:
             # Load cached analyses from DB
             print("Loading cached data from vault.db...")
@@ -768,7 +1072,7 @@ def main():
         with VaultDB() as db:
             all_analyses = db.get_all_fund_analyses()
 
-    patterns = extract_patterns(all_analyses)
+    patterns = extract_patterns(all_analyses, extra_data)
 
     # Rebuild consensus in DB after pattern extraction
     with VaultDB() as db:
