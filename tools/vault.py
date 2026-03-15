@@ -1039,6 +1039,232 @@ def cmd_project(args):
     print()
 
 
+def cmd_flow_start(args):
+    """Morning startup flow: everything you need to begin your day."""
+    print()
+    print(f"{'=' * 55}")
+    print(f"  DAILY STARTUP FLOW")
+    print(f"{'=' * 55}")
+    print()
+
+    # 1. Morning briefing
+    print("  STEP 1/4: Morning Briefing")
+    print(f"  {'─' * 50}")
+    cmd_morning()
+
+    # 2. Check plan
+    print("\n  STEP 2/4: Active Plan")
+    print(f"  {'─' * 50}")
+    cmd_plan(None)
+
+    # 3. News vs theses
+    print("  STEP 3/4: News Impact Check")
+    print(f"  {'─' * 50}")
+    cmd_news_impact(['3'])
+
+    # 4. Regime
+    print("  STEP 4/4: Market Regime")
+    print(f"  {'─' * 50}")
+    cmd_regime(None)
+
+    print(f"{'=' * 55}")
+    print("  WHAT NEXT:")
+    print("    Ready to buy?    vault buy-flow TICKER")
+    print("    Want to research? vault research-flow TICKER")
+    print("    Run a report?    vault weekly")
+    print(f"{'=' * 55}")
+    print()
+
+
+def cmd_flow_buy(args):
+    """Pre-trade flow: size → simulate → confirm."""
+    if not args:
+        print("Usage: vault buy-flow TICKER [AMOUNT]")
+        print("  Example: vault buy-flow XOM 600")
+        return
+
+    ticker = args[0].upper()
+    amount = None
+    if len(args) > 1:
+        try:
+            amount = float(args[1].replace('$', '').replace(',', ''))
+        except ValueError:
+            pass
+
+    print()
+    print(f"{'=' * 55}")
+    print(f"  PRE-TRADE FLOW — {ticker}")
+    print(f"{'=' * 55}")
+    print()
+
+    # 1. Position sizing
+    print("  STEP 1/4: Position Sizing")
+    print(f"  {'─' * 50}")
+    cmd_size(args)
+
+    # 2. Simulate
+    if amount:
+        print("  STEP 2/4: Portfolio Simulation")
+        print(f"  {'─' * 50}")
+        cmd_simulate([ticker, str(amount)])
+    else:
+        print("  STEP 2/4: Simulation (skipped — add amount for simulation)")
+        print()
+
+    # 3. Smart money check
+    print("  STEP 3/4: Smart Money Check")
+    print(f"  {'─' * 50}")
+    run_tool("db.py", ["smart-money", ticker])
+
+    # 4. News
+    print("\n  STEP 4/4: Recent News")
+    print(f"  {'─' * 50}")
+    run_tool("news.py", [ticker])
+
+    print()
+    print(f"{'=' * 55}")
+    print(f"  READY TO BUY {ticker}?")
+    print(f"    Execute on IBKR, then run:")
+    print(f"    vault convert {ticker} <PRICE> <SHARES>")
+    print(f"{'=' * 55}")
+    print()
+
+
+def cmd_flow_post_trade(args):
+    """Post-trade flow: log → journal → score → drift."""
+    if not args or len(args) < 3:
+        print("Usage: vault post-trade TICKER PRICE SHARES")
+        print("  Example: vault post-trade XOM 156.12 5")
+        return
+
+    ticker = args[0].upper()
+    price = args[1]
+    shares = args[2]
+
+    print()
+    print(f"{'=' * 55}")
+    print(f"  POST-TRADE FLOW — {ticker}")
+    print(f"{'=' * 55}")
+    print()
+
+    # 1. Log the trade
+    print("  STEP 1/4: Logging Trade")
+    print(f"  {'─' * 50}")
+    cmd_convert([ticker, price, shares])
+
+    # 2. Journal prompt
+    print("\n  STEP 2/4: Trade Journal")
+    print(f"  {'─' * 50}")
+    print(f"  Add a reflection later: vault journal {ticker} \"why I bought this\"")
+    print()
+
+    # 3. Updated scorecard
+    print("  STEP 3/4: Updated Scorecard")
+    print(f"  {'─' * 50}")
+    run_tool("scorer.py")
+
+    # 4. New drift check
+    print("\n  STEP 4/4: Portfolio Drift After Trade")
+    print(f"  {'─' * 50}")
+    cmd_drift(None)
+
+    print(f"{'=' * 55}")
+    print("  REMINDER: Update portfolio.md with the new position!")
+    print(f"{'=' * 55}")
+    print()
+
+
+def cmd_flow_research(args):
+    """Deep research flow for a single ticker."""
+    if not args:
+        print("Usage: vault research-flow TICKER")
+        print("  Example: vault research-flow NVDA")
+        return
+
+    ticker = args[0].upper()
+
+    print()
+    print(f"{'=' * 55}")
+    print(f"  RESEARCH FLOW — {ticker}")
+    print(f"{'=' * 55}")
+    print()
+
+    # 1. Fetch latest data
+    print("  STEP 1/5: Fetching Price Data")
+    print(f"  {'─' * 50}")
+    run_tool("data_fetcher.py", [ticker])
+
+    # 2. Smart money
+    print("\n  STEP 2/5: Smart Money Check")
+    print(f"  {'─' * 50}")
+    run_tool("db.py", ["smart-money", ticker])
+
+    # 3. Insider activity
+    print("\n  STEP 3/5: Insider Activity")
+    print(f"  {'─' * 50}")
+    run_tool("insider_check.py", [ticker])
+
+    # 4. News
+    print("\n  STEP 4/5: News & Sentiment")
+    print(f"  {'─' * 50}")
+    run_tool("news.py", [ticker])
+
+    # 5. Position sizing (if you were to buy)
+    print("\n  STEP 5/5: Position Sizing (if buying)")
+    print(f"  {'─' * 50}")
+    cmd_size([ticker, '**'])
+
+    print()
+    print(f"{'=' * 55}")
+    print(f"  RESEARCH COMPLETE — {ticker}")
+    print(f"    Want to buy? vault buy-flow {ticker} <AMOUNT>")
+    print(f"    Just watching? vault journal {ticker} \"research notes\"")
+    print(f"{'=' * 55}")
+    print()
+
+
+def cmd_flow_review(args):
+    """End-of-week review flow: score → drift → compare → project."""
+    print()
+    print(f"{'=' * 55}")
+    print(f"  WEEKLY REVIEW FLOW")
+    print(f"{'=' * 55}")
+    print()
+
+    # 1. Performance
+    print("  STEP 1/5: Performance Scorecard")
+    print(f"  {'─' * 50}")
+    run_tool("scorer.py")
+
+    # 2. Drift
+    print("\n  STEP 2/5: Portfolio Drift")
+    print(f"  {'─' * 50}")
+    cmd_drift(None)
+
+    # 3. Regime
+    print("  STEP 3/5: Market Regime")
+    print(f"  {'─' * 50}")
+    cmd_regime(None)
+
+    # 4. Peers
+    print("  STEP 4/5: Peer Comparison")
+    print(f"  {'─' * 50}")
+    cmd_peers(None)
+
+    # 5. Projection
+    print("  STEP 5/5: Investment Projection")
+    print(f"  {'─' * 50}")
+    cmd_project(None)
+
+    print(f"{'=' * 55}")
+    print("  ACTIONS:")
+    print("    Rebalance needed?  vault drift")
+    print("    Run new report?    vault weekly")
+    print("    Audit last report? vault audit")
+    print(f"{'=' * 55}")
+    print()
+
+
 def cmd_plan(args):
     """Show current action plan from notes/."""
     import glob
@@ -1186,7 +1412,14 @@ def cmd_help():
     print("    vault dashboard          Portfolio P&L (quick)")
     print("    vault help               This help")
     print()
-    print("  Tip: Start each day with `vault morning`")
+    print("  Flows (smart pipelines):")
+    print("    vault start              Morning startup (briefing + plan + news + regime)")
+    print("    vault buy-flow XOM 600   Pre-trade (size + simulate + smart money + news)")
+    print("    vault post-trade XOM 156 5  After buying (log + score + drift)")
+    print("    vault research-flow NVDA Deep research (data + smart money + insider + news)")
+    print("    vault review             End-of-week (score + drift + regime + peers + project)")
+    print()
+    print("  Tip: Start each day with `vault start`")
     print()
 
 
@@ -1224,9 +1457,14 @@ COMMANDS = {
     "peers":       lambda args: cmd_peers(args),
     "skeleton":    lambda args: cmd_skeleton(args),
     "weekly":      lambda args: cmd_weekly(args),
-    "project":     lambda args: cmd_project(args),
-    "plan":        lambda args: cmd_plan(args),
-    "news-impact": lambda args: cmd_news_impact(args),
+    "project":       lambda args: cmd_project(args),
+    "plan":          lambda args: cmd_plan(args),
+    "news-impact":   lambda args: cmd_news_impact(args),
+    "start":         lambda args: cmd_flow_start(args),
+    "buy-flow":      lambda args: cmd_flow_buy(args),
+    "post-trade":    lambda args: cmd_flow_post_trade(args),
+    "research-flow": lambda args: cmd_flow_research(args),
+    "review":        lambda args: cmd_flow_review(args),
     "audit":       lambda args: cmd_audit(args),
     "help":        lambda args: cmd_help(),
 }
