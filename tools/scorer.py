@@ -341,8 +341,55 @@ def main():
                     except Exception:
                         pass
             db.conn.commit()
-    except Exception:
-        pass
+
+            # Save scorecard snapshot for performance trending
+            returns = [t["return_pct"] for t in trades if t["return_pct"] is not None]
+            avg_return = sum(returns) / len(returns) if returns else None
+            valid_voo = [v for v in voo_returns if v is not None]
+            avg_voo = sum(valid_voo) / len(valid_voo) if valid_voo else None
+
+            total = len(trades)
+            open_count = sum(1 for t in trades if t["status"] == "OPEN")
+            closed_count = sum(1 for t in trades if t["status"] == "CLOSED")
+            closed_with_return = [t for t in trades if t["status"] == "CLOSED" and t["return_pct"] is not None]
+            win_rate = None
+            if closed_with_return:
+                wins = sum(1 for t in closed_with_return if t["return_pct"] > 0)
+                win_rate = (wins / len(closed_with_return)) * 100
+
+            best = max(trades, key=lambda t: t["return_pct"] if t["return_pct"] is not None else float("-inf"))
+            worst = min(trades, key=lambda t: t["return_pct"] if t["return_pct"] is not None else float("inf"))
+
+            holding_days = []
+            for t in trades:
+                if t["entry_date"]:
+                    end = t["exit_date"] if t["status"] == "CLOSED" and t["exit_date"] else date.today()
+                    holding_days.append((end - t["entry_date"]).days)
+            avg_holding = sum(holding_days) / len(holding_days) if holding_days else None
+
+            alpha = (avg_return - avg_voo) if avg_return is not None and avg_voo is not None else None
+            if alpha is not None:
+                verdict = "Outperforming" if alpha > 1.0 else "Underperforming" if alpha < -1.0 else "Too early to tell"
+            else:
+                verdict = "Too early to tell"
+
+            db.save_scorecard(
+                total_trades=total,
+                open_trades=open_count,
+                closed_trades=closed_count,
+                win_rate=win_rate,
+                avg_return=round(avg_return, 2) if avg_return is not None else None,
+                best_ticker=best["ticker"] if best["return_pct"] is not None else None,
+                best_return=round(best["return_pct"], 2) if best["return_pct"] is not None else None,
+                worst_ticker=worst["ticker"] if worst["return_pct"] is not None else None,
+                worst_return=round(worst["return_pct"], 2) if worst["return_pct"] is not None else None,
+                avg_holding_days=round(avg_holding, 1) if avg_holding is not None else None,
+                voo_avg=round(avg_voo, 2) if avg_voo is not None else None,
+                alpha=round(alpha, 2) if alpha is not None else None,
+                verdict=verdict,
+            )
+    except Exception as e:
+        print(f"Warning: could not save scorecard snapshot: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

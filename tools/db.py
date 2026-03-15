@@ -359,6 +359,26 @@ CREATE TABLE IF NOT EXISTS learnings (
     consumed    INTEGER DEFAULT 0,          -- 1 after report generator reads it
     created_at  TEXT NOT NULL
 );
+
+-- Scorecard snapshots (track system performance over time)
+CREATE TABLE IF NOT EXISTS scorecards (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT NOT NULL,
+    total_trades    INTEGER,
+    open_trades     INTEGER,
+    closed_trades   INTEGER,
+    win_rate        REAL,                   -- 0-100%
+    avg_return      REAL,                   -- portfolio avg return %
+    best_ticker     TEXT,
+    best_return     REAL,
+    worst_ticker    TEXT,
+    worst_return    REAL,
+    avg_holding_days REAL,
+    voo_avg         REAL,                   -- VOO same-period avg return %
+    alpha           REAL,                   -- portfolio avg - VOO avg
+    verdict         TEXT,                   -- 'Outperforming', 'Underperforming', 'Too early'
+    created_at      TEXT NOT NULL
+);
 """
 
 # ---------------------------------------------------------------------------
@@ -1459,6 +1479,35 @@ class VaultDB:
     # ------------------------------------------------------------------
     # Cross-cutting queries (the good stuff)
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Scorecards (performance tracking over time)
+    # ------------------------------------------------------------------
+    def save_scorecard(self, total_trades, open_trades, closed_trades,
+                       win_rate, avg_return, best_ticker, best_return,
+                       worst_ticker, worst_return, avg_holding_days,
+                       voo_avg, alpha, verdict):
+        """Save a scorecard snapshot for performance trending."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        # Upsert: only one snapshot per day
+        self.conn.execute("DELETE FROM scorecards WHERE date=?", (today,))
+        self.conn.execute("""
+            INSERT INTO scorecards
+            (date, total_trades, open_trades, closed_trades, win_rate,
+             avg_return, best_ticker, best_return, worst_ticker, worst_return,
+             avg_holding_days, voo_avg, alpha, verdict, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (today, total_trades, open_trades, closed_trades, win_rate,
+              avg_return, best_ticker, best_return, worst_ticker, worst_return,
+              avg_holding_days, voo_avg, alpha, verdict,
+              datetime.now().isoformat()))
+        self.conn.commit()
+
+    def get_scorecard_history(self, limit=12):
+        """Get scorecard history for performance trending."""
+        return self.conn.execute("""
+            SELECT * FROM scorecards ORDER BY date DESC LIMIT ?
+        """, (limit,)).fetchall()
+
     def portfolio_dashboard(self):
         """One-shot portfolio overview: holdings + current prices + P&L."""
         return self.conn.execute("""
@@ -1672,6 +1721,19 @@ class VaultDB:
             lines.append(f"  {'─' * 52}")
             for imp in high_priority[:3]:
                 lines.append(f"  [{imp['priority']}] {imp['finding'][:50]}")
+
+        # ── Performance Trend ──
+        scorecards = self.get_scorecard_history(limit=5)
+        if scorecards:
+            lines.append("")
+            lines.append(f"  PERFORMANCE TREND (last {len(scorecards)} snapshots)")
+            lines.append(f"  {'─' * 52}")
+            lines.append(f"  {'Date':<12} {'Trades':>7} {'Win%':>6} {'Avg Ret':>8} {'Alpha':>7} {'Verdict'}")
+            for sc in scorecards:
+                wr = f"{sc['win_rate']:.0f}%" if sc['win_rate'] is not None else " n/a"
+                ar = f"{sc['avg_return']:+.1f}%" if sc['avg_return'] is not None else "  n/a"
+                al = f"{sc['alpha']:+.1f}%" if sc['alpha'] is not None else "  n/a"
+                lines.append(f"  {sc['date']:<12} {sc['total_trades']:>7} {wr:>6} {ar:>8} {al:>7} {sc['verdict']}")
 
         # ── Footer ──
         lines.append("")
