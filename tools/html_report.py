@@ -31,6 +31,7 @@ CALLOUT_SECTIONS = {
     "doomsday": "callout callout-danger",
     "alert conditions": "callout callout-info",
     "uncomfortable questions": "callout callout-danger",
+    "validation summary": "callout callout-info",
 }
 
 CALLOUT_LABELS = {
@@ -38,6 +39,7 @@ CALLOUT_LABELS = {
     "doomsday": "Stress Test",
     "alert conditions": "Watch List",
     "uncomfortable questions": "Devil's Advocate",
+    "validation summary": "Devil's Gate",
 }
 
 MARKET_SECTIONS = {"market snapshot"}
@@ -160,28 +162,26 @@ def markdown_to_html(md_text):
             i += 1
             continue
 
-        # Unordered list
+        # Unordered list (with nested list support)
         if re.match(r"^[-*] ", stripped):
             list_lines = []
             while i < len(lines) and re.match(r"^\s*[-*] ", lines[i]):
-                list_lines.append(re.sub(r"^\s*[-*] ", "", lines[i]).strip())
+                indent = len(lines[i]) - len(lines[i].lstrip())
+                text = re.sub(r"^\s*[-*] ", "", lines[i]).strip()
+                list_lines.append((indent, text))
                 i += 1
-            html_parts.append("<ul>")
-            for item in list_lines:
-                html_parts.append(f"<li>{_inline(_escape(item))}</li>")
-            html_parts.append("</ul>")
+            html_parts.append(_build_nested_list(list_lines, ordered=False))
             continue
 
-        # Ordered list
+        # Ordered list (with nested list support)
         if re.match(r"^\d+\. ", stripped):
             list_lines = []
             while i < len(lines) and re.match(r"^\s*\d+\. ", lines[i]):
-                list_lines.append(re.sub(r"^\s*\d+\.\s*", "", lines[i]).strip())
+                indent = len(lines[i]) - len(lines[i].lstrip())
+                text = re.sub(r"^\s*\d+\.\s*", "", lines[i]).strip()
+                list_lines.append((indent, text))
                 i += 1
-            html_parts.append("<ol>")
-            for item in list_lines:
-                html_parts.append(f"<li>{_inline(_escape(item))}</li>")
-            html_parts.append("</ol>")
+            html_parts.append(_build_nested_list(list_lines, ordered=True))
             continue
 
         # Code block
@@ -225,7 +225,9 @@ def _escape(text):
 
 
 def _inline(text):
-    """Convert inline markdown (bold, italic, code) to HTML."""
+    """Convert inline markdown (bold, italic, code, links) to HTML."""
+    # Links [text](url)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
     # Bold + italic
     text = re.sub(r"\*\*\*(.+?)\*\*\*", r"<strong><em>\1</em></strong>", text)
     # Bold
@@ -237,6 +239,38 @@ def _inline(text):
     # Arrow →
     text = text.replace("→", "&rarr;")
     return text
+
+
+def _build_nested_list(items, ordered=False):
+    """Build nested HTML list from (indent, text) tuples."""
+    if not items:
+        return ""
+    tag = "ol" if ordered else "ul"
+    result = [f"<{tag}>"]
+    base_indent = items[0][0]
+
+    idx = 0
+    while idx < len(items):
+        indent, text = items[idx]
+        if indent <= base_indent:
+            # Collect children (items with greater indent)
+            children = []
+            child_idx = idx + 1
+            while child_idx < len(items) and items[child_idx][0] > base_indent:
+                children.append(items[child_idx])
+                child_idx += 1
+            if children:
+                result.append(f"<li>{_inline(_escape(text))}")
+                result.append(_build_nested_list(children, ordered))
+                result.append("</li>")
+            else:
+                result.append(f"<li>{_inline(_escape(text))}</li>")
+            idx = child_idx
+        else:
+            idx += 1
+
+    result.append(f"</{tag}>")
+    return "\n".join(result)
 
 
 def _parse_heading(line):
@@ -324,7 +358,7 @@ def _convert_table(lines):
     table = ['<div class="table-wrap"><table>']
     table.append("<thead><tr>")
     for h in headers:
-        table.append(f"<th>{_escape(h)}</th>")
+        table.append(f'<th scope="col">{_escape(h)}</th>')
     table.append("</tr></thead>")
     table.append("<tbody>")
 
@@ -356,9 +390,13 @@ def _classify_cell(cell):
         return ' class="action-avoid"'
 
     if re.match(r"^[+]\$?\d", cell) or re.match(r"^\+\d", cell):
-        return ' class="positive"'
+        return ' class="positive num-right"'
     if re.match(r"^-\$?\d", cell) or re.match(r"^-\d", cell):
-        return ' class="negative"'
+        return ' class="negative num-right"'
+
+    # Right-align numeric cells (prices, percentages, plain numbers)
+    if re.match(r"^\$[\d,]+\.?\d*$", cell.strip()) or re.match(r"^[\d,]+\.?\d*%?$", cell.strip()):
+        return ' class="num-right"'
 
     return ""
 

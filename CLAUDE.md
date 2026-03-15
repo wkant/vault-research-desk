@@ -19,12 +19,32 @@ A personal investment research system with 4 analysis phases, adversarial valida
 
 ## Unified CLI
 ```bash
+# Daily
 python3 tools/vault.py morning       # Start here every day
 python3 tools/vault.py changes       # What changed since last report
-python3 tools/vault.py score         # Performance scorecard
 python3 tools/vault.py alerts        # Check alert thresholds
-python3 tools/vault.py screen        # S&P 500 screener
-python3 tools/vault.py news GOOGL    # News for ticker
+python3 tools/vault.py score         # Performance scorecard
+python3 tools/vault.py regime        # Market regime detection (risk-on/off)
+
+# Portfolio
+python3 tools/vault.py drift         # Allocation drift analysis
+python3 tools/vault.py size GOOGL ** # Position sizing calculator
+python3 tools/vault.py simulate XOM 1000 LMT 800  # Simulate new positions
+python3 tools/vault.py convert TICKER PRICE SHARES # Watchlist → trade
+python3 tools/vault.py journal GOOGL "reflection"  # Trade journal
+
+# Report Pipeline
+python3 tools/vault.py weekly        # Full weekly pipeline (auto)
+python3 tools/vault.py preflight     # Phase 0: all data collection
+python3 tools/vault.py skeleton      # Generate pre-filled report draft
+python3 tools/vault.py validate      # Pre-report validation gate
+python3 tools/vault.py search-log    # Generate Search Log
+python3 tools/vault.py audit         # Post-report quality check
+python3 tools/vault.py compare D1 D2 # Compare two reports
+
+# Analysis
+python3 tools/vault.py peers         # Compare to top investors
+python3 tools/vault.py backtest      # Backtest closed trades
 python3 tools/vault.py help          # Full command reference
 # Shortcuts: m=morning, s=score, a=alerts, n=news, c=changes, h=help
 ```
@@ -114,6 +134,15 @@ python3 tools/data_fetcher.py --portfolio-only    # Portfolio only
 python3 tools/screener.py                        # Full S&P 500 scan (~500 tickers)
 python3 tools/screener.py --sample 50            # Quick scan (50 random tickers)
 python3 tools/screener.py --top 10               # Show top 10 results
+```
+
+## Quality & Audit
+```bash
+python3 tools/vault.py preflight                 # Phase 0: all data collection before report
+python3 tools/vault.py audit                     # Audit latest report for pipeline compliance
+python3 tools/vault.py audit reports/report_YYYY-MM-DD.md  # Audit specific report
+python3 tools/vault.py search-log                # Generate Search Log from cached prices
+python3 tools/vault.py search-log XOM LMT        # Include extra tickers
 ```
 
 ## Monitoring

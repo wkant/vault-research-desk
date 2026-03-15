@@ -302,6 +302,9 @@ tbody tr:hover td {
     background: #f0f4f8;
 }
 
+/* Numeric cells: right-align prices, percentages, numbers */
+td.num-right { text-align: right; font-variant-numeric: tabular-nums; }
+
 /* --- Conviction indicators --- */
 
 .conviction {
@@ -436,6 +439,8 @@ td:first-child {
     th, td { padding: 6px 10px; }
     .market-data { background: #f8f8f8; }
     .callout { break-inside: avoid; }
+    .table-wrap { break-inside: avoid; }
+    h2, h3 { break-after: avoid; }
     .footer { font-size: 9px; }
 }
 
@@ -470,9 +475,9 @@ td:first-child {
 <h2>This Week</h2>
 <div class="table-wrap"><table>
 <thead><tr>
-<th>Day</th>
-<th>Event</th>
-<th>Why It Matters</th>
+<th scope="col">Day</th>
+<th scope="col">Event</th>
+<th scope="col">Why It Matters</th>
 </tr></thead>
 <tbody>
 <tr>
@@ -504,62 +509,62 @@ td:first-child {
 <h2>Changes Since Last Report (March 14)</h2>
 <div class="table-wrap"><table>
 <thead><tr>
-<th>Pick</th>
-<th>Rec. Price</th>
-<th>Current</th>
-<th>P&amp;L</th>
-<th>Thesis?</th>
+<th scope="col">Pick</th>
+<th scope="col">Rec. Price</th>
+<th scope="col">Current</th>
+<th scope="col">P&amp;L</th>
+<th scope="col">Thesis?</th>
 </tr></thead>
 <tbody>
 <tr>
 <td>GOOGL</td>
-<td>$305.00</td>
-<td>$302.28</td>
-<td class="negative">-0.9%</td>
+<td class="num-right">$305.00</td>
+<td class="num-right">$302.28</td>
+<td class="negative num-right">-0.9%</td>
 <td>Intact — smart money holds. RSI 39.4 = good add zone.</td>
 </tr>
 <tr>
 <td>XLE</td>
-<td>$56.00</td>
-<td>$57.70</td>
+<td class="num-right">$56.00</td>
+<td class="num-right">$57.70</td>
 <td><strong>+3.0%</strong></td>
 <td>Validated — 52-week high</td>
 </tr>
 <tr>
 <td>XLV</td>
-<td>$152.00</td>
-<td>$149.79</td>
-<td class="negative">-1.5%</td>
+<td class="num-right">$152.00</td>
+<td class="num-right">$149.79</td>
+<td class="negative num-right">-1.5%</td>
 <td>Weakening — RSI 25.8. $140 = exit line</td>
 </tr>
 <tr>
 <td>GLD</td>
-<td>$470.00</td>
-<td>$460.84</td>
-<td class="negative">-1.9%</td>
+<td class="num-right">$470.00</td>
+<td class="num-right">$460.84</td>
+<td class="negative num-right">-1.9%</td>
 <td>Intact — DXY headwind temporary. War hedge working as insurance.</td>
 </tr>
 </tbody></table></div>
 <div class="table-wrap"><table>
 <thead><tr>
-<th>AVOID calls</th>
-<th>Status</th>
-<th>Correct?</th>
+<th scope="col">AVOID calls</th>
+<th scope="col">Status</th>
+<th scope="col">Correct?</th>
 </tr></thead>
 <tbody>
 <tr>
 <td>XLY (Cons. Disc.)</td>
-<td class="negative">-2.9% since call</td>
+<td class="negative num-right">-2.9% since call</td>
 <td>YES</td>
 </tr>
 <tr>
 <td>XLRE (Real Estate)</td>
-<td class="negative">-0.4% since call</td>
+<td class="negative num-right">-0.4% since call</td>
 <td>YES</td>
 </tr>
 <tr>
 <td>IGV (Software)</td>
-<td class="negative">-1.8% since call</td>
+<td class="negative num-right">-1.8% since call</td>
 <td>YES</td>
 </tr>
 </tbody></table></div>
@@ -568,44 +573,44 @@ td:first-child {
 <h2>Your Portfolio</h2>
 <div class="table-wrap"><table>
 <thead><tr>
-<th>Stock</th>
-<th>Shares</th>
-<th>Cost</th>
-<th>Current</th>
-<th>P&amp;L</th>
-<th>Action</th>
+<th scope="col">Stock</th>
+<th scope="col">Shares</th>
+<th scope="col">Cost</th>
+<th scope="col">Current</th>
+<th scope="col">P&amp;L</th>
+<th scope="col">Action</th>
 </tr></thead>
 <tbody>
 <tr>
 <td>XLE</td>
-<td>3.5994</td>
-<td>$56</td>
-<td>$57.70</td>
-<td class="positive">+3.0%</td>
+<td class="num-right">3.5994</td>
+<td class="num-right">$56</td>
+<td class="num-right">$57.70</td>
+<td class="positive num-right">+3.0%</td>
 <td><strong>HOLD</strong> — 52-wk high. Don't add (RSI 68.9, near overbought). XOM is the better energy add.</td>
 </tr>
 <tr>
 <td>GOOGL</td>
-<td>1.1412</td>
-<td>$305</td>
-<td>$302.28</td>
-<td class="negative">-0.9%</td>
+<td class="num-right">1.1412</td>
+<td class="num-right">$305</td>
+<td class="num-right">$302.28</td>
+<td class="negative num-right">-0.9%</td>
 <td><strong>BUY MORE</strong> — RSI 39.4 = good entry. Currently 44% but drops to 15% after deployment. Add $450.</td>
 </tr>
 <tr>
 <td>XLV</td>
-<td>0.9814</td>
-<td>$152</td>
-<td>$149.79</td>
-<td class="negative">-1.5%</td>
+<td class="num-right">0.9814</td>
+<td class="num-right">$152</td>
+<td class="num-right">$149.79</td>
+<td class="negative num-right">-1.5%</td>
 <td><strong>HOLD</strong> — don't add. RSI 25.8, thesis weakening. <strong>SELL if breaks $140.</strong></td>
 </tr>
 <tr>
 <td>GLD</td>
-<td>0.1997</td>
-<td>$470</td>
-<td>$460.84</td>
-<td class="negative">-1.9%</td>
+<td class="num-right">0.1997</td>
+<td class="num-right">$470</td>
+<td class="num-right">$460.84</td>
+<td class="negative num-right">-1.9%</td>
 <td><strong>BUY MORE</strong> — war hedge. Add $350 to bring to 8% of total.</td>
 </tr>
 </tbody></table></div>
@@ -613,8 +618,8 @@ td:first-child {
 <p><strong>SELL/TRIM check:</strong> All 4 reviewed. No stops hit. No thesis breaks. XLV is the only concern — watching $140 line.</p>
 <div class="table-wrap"><table>
 <thead><tr>
-<th>Check</th>
-<th>Status</th>
+<th scope="col">Check</th>
+<th scope="col">Status</th>
 </tr></thead>
 <tbody>
 <tr>
@@ -636,19 +641,19 @@ td:first-child {
 <h3>Target Portfolio After Deployment</h3>
 <div class="table-wrap"><table>
 <thead><tr>
-<th>Position</th>
-<th>Current</th>
-<th>Add</th>
-<th>Total</th>
-<th>Weight</th>
-<th>Sector</th>
+<th scope="col">Position</th>
+<th scope="col">Current</th>
+<th scope="col">Add</th>
+<th scope="col">Total</th>
+<th scope="col">Weight</th>
+<th scope="col">Sector</th>
 </tr></thead>
 <tbody>
 <tr>
 <td>GOOGL</td>
-<td>$345</td>
+<td class="num-right">$345</td>
 <td><strong>+$450</strong></td>
-<td>$795</td>
+<td class="num-right">$795</td>
 <td><strong>15.0%</strong></td>
 <td>Technology</td>
 </tr>
@@ -656,7 +661,7 @@ td:first-child {
 <td>XOM (new)</td>
 <td>—</td>
 <td><strong>+$800</strong></td>
-<td>$800</td>
+<td class="num-right">$800</td>
 <td><strong>15.1%</strong></td>
 <td>Energy</td>
 </tr>
@@ -664,7 +669,7 @@ td:first-child {
 <td>XLU (new)</td>
 <td>—</td>
 <td><strong>+$700</strong></td>
-<td>$700</td>
+<td class="num-right">$700</td>
 <td><strong>13.2%</strong></td>
 <td>Utilities</td>
 </tr>
@@ -672,31 +677,31 @@ td:first-child {
 <td>LMT (new)</td>
 <td>—</td>
 <td><strong>+$600</strong></td>
-<td>$600</td>
+<td class="num-right">$600</td>
 <td><strong>11.3%</strong></td>
 <td>Defense</td>
 </tr>
 <tr>
 <td>GLD</td>
-<td>$92</td>
+<td class="num-right">$92</td>
 <td><strong>+$350</strong></td>
-<td>$442</td>
+<td class="num-right">$442</td>
 <td><strong>8.4%</strong></td>
 <td>Gold</td>
 </tr>
 <tr>
 <td>XLE</td>
-<td>$208</td>
+<td class="num-right">$208</td>
 <td>—</td>
-<td>$208</td>
+<td class="num-right">$208</td>
 <td><strong>3.9%</strong></td>
 <td>Energy</td>
 </tr>
 <tr>
 <td>XLV</td>
-<td>$147</td>
+<td class="num-right">$147</td>
 <td>—</td>
-<td>$147</td>
+<td class="num-right">$147</td>
 <td><strong>2.8%</strong></td>
 <td>Healthcare</td>
 </tr>
@@ -704,7 +709,7 @@ td:first-child {
 <td><strong>Cash</strong></td>
 <td>—</td>
 <td><strong>$1,600</strong></td>
-<td>$1,600</td>
+<td class="num-right">$1,600</td>
 <td><strong>30.2%</strong></td>
 <td>—</td>
 </tr>
@@ -720,52 +725,52 @@ td:first-child {
 <h3>Sector Breakdown After Deployment</h3>
 <div class="table-wrap"><table>
 <thead><tr>
-<th>Sector</th>
-<th>Positions</th>
-<th>$ Value</th>
-<th>Weight</th>
+<th scope="col">Sector</th>
+<th scope="col">Positions</th>
+<th scope="col">$ Value</th>
+<th scope="col">Weight</th>
 </tr></thead>
 <tbody>
 <tr>
 <td>Energy</td>
 <td>XLE + XOM</td>
-<td>$1,008</td>
+<td class="num-right">$1,008</td>
 <td><strong>19.0%</strong></td>
 </tr>
 <tr>
 <td>Technology</td>
 <td>GOOGL</td>
-<td>$795</td>
+<td class="num-right">$795</td>
 <td><strong>15.0%</strong></td>
 </tr>
 <tr>
 <td>Utilities</td>
 <td>XLU</td>
-<td>$700</td>
+<td class="num-right">$700</td>
 <td><strong>13.2%</strong></td>
 </tr>
 <tr>
 <td>Defense</td>
 <td>LMT</td>
-<td>$600</td>
+<td class="num-right">$600</td>
 <td><strong>11.3%</strong></td>
 </tr>
 <tr>
 <td>Gold</td>
 <td>GLD</td>
-<td>$442</td>
+<td class="num-right">$442</td>
 <td><strong>8.4%</strong></td>
 </tr>
 <tr>
 <td>Healthcare</td>
 <td>XLV</td>
-<td>$147</td>
+<td class="num-right">$147</td>
 <td><strong>2.8%</strong></td>
 </tr>
 <tr>
 <td>Cash</td>
 <td>—</td>
-<td>$1,600</td>
+<td class="num-right">$1,600</td>
 <td><strong>30.2%</strong></td>
 </tr>
 </tbody></table></div>
@@ -779,14 +784,14 @@ td:first-child {
 <h2>What to Buy</h2>
 <div class="table-wrap"><table>
 <thead><tr>
-<th>Ticker</th>
-<th>Name</th>
-<th>Conv.</th>
-<th>Entry</th>
-<th>Stop</th>
-<th>Target</th>
-<th>Why</th>
-<th>Size</th>
+<th scope="col">Ticker</th>
+<th scope="col">Name</th>
+<th scope="col">Conv.</th>
+<th scope="col">Entry</th>
+<th scope="col">Stop</th>
+<th scope="col">Target</th>
+<th scope="col">Why</th>
+<th scope="col">Size</th>
 </tr></thead>
 <tbody>
 <tr>
@@ -797,7 +802,7 @@ td:first-child {
 <td>$256 (200 DMA)</td>
 <td>$340 (6-mo)</td>
 <td>RSI 39.4 = good add zone. Brings position from 6.5% to 15%. Thesis intact, smart money holds.</td>
-<td>$450</td>
+<td class="num-right">$450</td>
 </tr>
 <tr>
 <td>XOM</td>
@@ -807,17 +812,17 @@ td:first-child {
 <td>$140 (50 DMA)</td>
 <td>$180 (6-mo)</td>
 <td>War = US energy earnings boom. Crack spreads $40/bbl. RSI 60.8, not overbought. Integrated = wins at any oil price. 3.4% dividend. <strong>FLAG: ceasefire kills upside.</strong></td>
-<td>$800</td>
+<td class="num-right">$800</td>
 </tr>
 <tr>
 <td>XLU</td>
 <td>Utilities Select</td>
 <td><code>**</code></td>
 <td>$46-48</td>
-<td>$43</td>
+<td class="num-right">$43</td>
 <td>$52 (6-mo)</td>
 <td>#1 sector 3 weeks running. RSI 53, not overbought. 3% yield. Defensive anchor for the portfolio.</td>
-<td>$700</td>
+<td class="num-right">$700</td>
 </tr>
 <tr>
 <td>LMT</td>
@@ -827,7 +832,7 @@ td:first-child {
 <td>$600 (below 50 DMA)</td>
 <td>$700 (6-mo)</td>
 <td>War = defense spending surge. RSI 45.9 = neutral entry. NOC/GD confirming sector strength. <strong>FLAG: ceasefire kills thesis.</strong></td>
-<td>$600</td>
+<td class="num-right">$600</td>
 </tr>
 <tr>
 <td>GLD</td>
@@ -837,7 +842,7 @@ td:first-child {
 <td>$370 (200 DMA)</td>
 <td>$500 (6-mo)</td>
 <td>War hedge. Brings position from 1.7% to 8.4%. DXY headwind is temporary. Central banks still buying.</td>
-<td>$350</td>
+<td class="num-right">$350</td>
 </tr>
 </tbody></table></div>
 <h3>Deployment Order — AFTER FOMC Wednesday</h3>
@@ -927,7 +932,7 @@ ALL PRICES VERIFIED</code></pre>
 <h2>Disclaimer</h2>
 <p>This is a personal research tool for educational purposes. Not financial advice. All investment decisions are your own. Past performance does not guarantee future results.</p>
 <div class="footer">
-    Vault Research Desk &mdash; 2026-03-15 19:03
+    Vault Research Desk &mdash; 2026-03-15 20:52
 </div>
 </div>
 </body>

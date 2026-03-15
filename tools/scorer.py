@@ -236,14 +236,25 @@ def print_scorecard(trades, voo_returns):
     else:
         alpha = None
 
+    # --- Profit Factor ---
+    sum_wins = sum(r for r in returns if r > 0)
+    sum_losses = abs(sum(r for r in returns if r < 0))
+    profit_factor = sum_wins / sum_losses if sum_losses > 0 else None
+
     # --- Verdict ---
-    if alpha is not None:
-        if alpha > 1.0:
+    if total < 5:
+        verdict = "Too early to tell"
+    elif alpha is not None:
+        if alpha > 3.0:
+            verdict = "Strong outperformance"
+        elif alpha > 1.0:
             verdict = "Outperforming"
-        elif alpha < -1.0:
+        elif alpha > -1.0:
+            verdict = "Tracking benchmark"
+        elif alpha > -3.0:
             verdict = "Underperforming"
         else:
-            verdict = "Too early to tell"
+            verdict = "Significant underperformance"
     elif closed_count == 0:
         verdict = "Too early to tell"
     else:
@@ -259,6 +270,9 @@ def print_scorecard(trades, voo_returns):
     print(f"  Total calls: {total}")
     print(f"  Open: {open_count} | Closed: {closed_count}")
     print(f"  Win rate: {win_rate}")
+    if profit_factor is not None:
+        pf_label = "Excellent" if profit_factor > 2.0 else "Good" if profit_factor > 1.5 else "OK" if profit_factor > 1.0 else "Poor"
+        print(f"  Profit factor: {profit_factor:.2f} ({pf_label})")
     print()
     print("RETURNS (including unrealized)")
     print(f"  Average: {format_pct(avg_return)}")
@@ -291,6 +305,41 @@ def print_scorecard(trades, voo_returns):
     print(f"  Portfolio avg: {format_pct(avg_return)}")
     print(f"  VOO same periods: {format_pct(avg_voo)}")
     print(f"  Alpha: {format_pct(alpha)}")
+
+    # --- Kelly Criterion (after 20+ closed trades) ---
+    if closed_count >= 20 and winners > 0 and losers > 0:
+        win_returns = [r for r in returns if r > 0]
+        loss_returns = [abs(r) for r in returns if r < 0]
+        avg_win_r = sum(win_returns) / len(win_returns)
+        avg_loss_r = sum(loss_returns) / len(loss_returns)
+        win_rate_pct = winners / (winners + losers)
+        if avg_win_r > 0:
+            kelly = (win_rate_pct * avg_win_r - (1 - win_rate_pct) * avg_loss_r) / avg_win_r
+            half_kelly = kelly / 2
+            print()
+            print("KELLY CRITERION")
+            print(f"  Full Kelly: {kelly:.1%} of portfolio per trade")
+            print(f"  Half Kelly (recommended): {half_kelly:.1%} per trade")
+            if half_kelly < 0:
+                print(f"  WARNING: Negative Kelly — system is losing money on average")
+            elif half_kelly > 0.25:
+                print(f"  Note: High Kelly suggests strong edge — but cap at 18% per position")
+
+    # --- Turnover ---
+    if holding_days and total > 0:
+        avg_days = sum(holding_days) / len(holding_days)
+        if avg_days > 0:
+            implied_turnover = 365 / avg_days * 100
+            print()
+            print("TURNOVER")
+            print(f"  Implied annual: {implied_turnover:.0f}%")
+            if implied_turnover > 200:
+                print(f"  WARNING: Very high turnover — fees and taxes will erode returns")
+            elif implied_turnover > 50:
+                print(f"  Note: Above optimal ~25%/year (academic research)")
+            else:
+                print(f"  Good: Within optimal range")
+
     print()
     print(f"VERDICT: {verdict}")
     print()

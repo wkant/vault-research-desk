@@ -186,10 +186,10 @@ def scan_ticker(ticker, missing_sectors=None, owned_tickers=None):
         signals.append("Oversold")
         score += 2
 
-    # 2. RSI overbought
+    # 2. RSI overbought — flag for AVOID list, penalize ranking
     if rsi is not None and rsi > 70:
         signals.append("Overbought")  # AUTO-FIX: AVOID VALIDATION — AVOID calls validated at 3/3 accuracy
-        score += 1  # still positive for ranking visibility; flagged as AVOID
+        score -= 1  # negative: overbought stocks should rank lower, not higher
 
     # 3. Golden cross
     if dma_50 is not None and dma_200 is not None and price > dma_50 > dma_200:

@@ -27,7 +27,7 @@ A personal investment research system. It produces weekly market reports with BU
 ## Execution Flow
 
 ```
-PHASE 0: Data Collection
+PHASE 0: Data Collection (run `vault preflight` to automate mandatory steps)
     tools/data_fetcher.py — prices, technicals, breadth, news, auto-alerts (mandatory)
     tools/screener.py --sample 50 — quick candidate scan (mandatory)
     tools/correlation.py — portfolio correlation check (mandatory)
@@ -82,6 +82,7 @@ Every price in the report must be verified. No exceptions.
 3. Record every verified price in the Search Log
 
 ### Search Log (posted in chat before Devil's Gate)
+Generate using: `vault search-log [EXTRA_TICKERS]` or `db.generate_search_log(tickers)`.
 ```
 ═══ SEARCH LOG ═══
 | # | Ticker | Verified Price | Source | Date |
@@ -90,7 +91,8 @@ Every price in the report must be verified. No exceptions.
 
 - Every ticker in the report MUST have a row
 - If a ticker is missing from the Search Log, it CANNOT appear in the report
-- Any entry zone >7% below verified price without justification → REJECT
+- **Include the Search Log in the final report** (after "Changes Since Last Report", before "Your Portfolio")
+- Any entry zone >7% below verified price without justification → REJECT (see Entry Zone Rules below)
 
 ---
 
@@ -143,6 +145,20 @@ Based on portfolio.md risk tolerance setting:
 - No single sector >35% of total portfolio
 - No two BUY picks with >0.8 correlation without justification
 - No buying a stock 1-3 days before earnings (unless flagged as earnings play with reduced size)
+
+### Sizing Rule Priority (when frameworks conflict)
+Multiple sizing rules exist across system files. Apply in this order — first applicable rule wins:
+1. **Hard limits** (above) — always enforced, never overridden
+2. **Circuit breaker** (05_position_mgmt.md) — if portfolio drawdown >15%, raise cash first
+3. **Conviction-weighted sizing** (this file) — `***` up to 18%, `**` up to 12%, `*` up to 7%
+4. **Risk tolerance allocation** (table above) — sets overall stock/cash mix
+5. **Core/Satellite structure** (05_position_mgmt.md) — shapes position roles
+6. **Kelly Criterion** (05_position_mgmt.md) — sanity check only, after 20+ trades
+
+### Entry Zone Rules (unified)
+- **Target**: Entry within 5% of verified price
+- **Flag**: Entry 5-7% below verified price — requires explicit justification (limit order, expected pullback)
+- **Reject**: Entry >7% below verified price — auto-reject unless extraordinary circumstances documented
 
 ---
 

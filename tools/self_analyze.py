@@ -707,16 +707,26 @@ def identify_patterns(predictions, quality_issues, perf_log, reports):
             "fix": "Generate at least 4-5 weekly reports before drawing conclusions. Keep running the system consistently.",
         })
 
-    # Pattern: All BUYs, no SELLs
+    # Pattern: Buy bias (catches gradations, not just zero sells)
     buy_count = sum(1 for e in perf_log if e.get("action", "").upper() == "BUY")
     sell_count = sum(1 for e in perf_log if e.get("action", "").upper() in ("SELL", "TRIM"))
-    if buy_count > 3 and sell_count == 0:
-        patterns.append({
-            "name": "Buy Bias",
-            "description": "The system recommends buys but never sells.",
-            "evidence": f"{buy_count} BUY calls, {sell_count} SELL calls.",
-            "fix": "Review stop-loss levels on every report. If a thesis breaks, recommend SELL explicitly. Don't wait for the investor to ask.",
-        })
+    total_actions = buy_count + sell_count
+    if total_actions > 3:
+        buy_ratio = buy_count / total_actions
+        if sell_count == 0:
+            patterns.append({
+                "name": "Buy Bias",
+                "description": "The system recommends buys but never sells.",
+                "evidence": f"{buy_count} BUY calls, {sell_count} SELL calls.",
+                "fix": "Review stop-loss levels on every report. If a thesis breaks, recommend SELL explicitly. Don't wait for the investor to ask.",
+            })
+        elif buy_ratio > 0.85:
+            patterns.append({
+                "name": "Buy Bias",
+                "description": "The system strongly favors buys over sells.",
+                "evidence": f"{buy_count} BUY vs {sell_count} SELL ({buy_ratio:.0%} buy ratio).",
+                "fix": "For EVERY holding, explicitly ask: is there a reason to SELL or TRIM? Evaluate before recommending new BUYs.",
+            })
 
     # Pattern: Concentration in recommendations
     tickers = [c["ticker"] for c in predictions["buy_calls"]]

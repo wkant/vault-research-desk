@@ -63,10 +63,10 @@ Find ONE realistic scenario that kills 3+ picks simultaneously. Mandatory every 
 - No doomsday that kills 3+ with no hedge → REJECT
 
 ### Test 4: Entry Zone Reality Check
-For each BUY:
-1. Is entry within 5% of verified price? (Cross-reference Search Log)
-2. Is stop below a meaningful level (not just "10% below")?
-3. Is risk/reward at least 2:1?
+For each BUY (see unified entry zone rules in 00_system.md):
+1. Is entry within 5% of verified price? 5-7% gap requires justification → FLAG. >7% gap → REJECT.
+2. Is stop below a meaningful level (not just "10% below")? Use meaningful technicals first, % fallback per 05_position_mgmt.md.
+3. Is risk/reward at least 2:1? (1.5:1 acceptable for `*` speculative picks only)
 4. Is the ticker in the Search Log? No row → AUTOMATIC REJECT.
 
 ### Test 5: Investor Test
@@ -83,6 +83,12 @@ Compare against previous report AND thesis log:
 - Any stop-loss triggered but not acknowledged? → REJECT
 - Repeating a failed thesis without new evidence? → FLAG
 - Thesis tracker shows a FLIP warning? → must be explained or REJECT
+
+**What counts as a thesis flip:**
+- Direction change: BUY → SELL, or SELL → BUY, within 2 reports
+- Conviction drop of 2+ levels (*** → *) without new adverse data
+- Target moved >20% in either direction without catalyst
+- "HOLD" after recommending SELL (or vice versa) without explicit new evidence
 
 ### Test 7: Omission Audit
 What's MISSING?

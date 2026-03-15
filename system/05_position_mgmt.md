@@ -26,13 +26,13 @@ Mechanical rules for managing positions over time. These remove emotion from dec
 ### Initial Stops
 Set at time of purchase. Non-negotiable.
 
+**Priority:** Use a meaningful technical level (support, 50/200 DMA, 52-week low) that falls within the conviction range below. If no meaningful level exists within range, use the percentage rule as fallback.
+
 | Conviction | Stop Distance | Example |
 |-----------|--------------|---------|
 | `***` HIGH | 10-12% below entry | Entry $100, stop $88-90 |
 | `**` MEDIUM | 8-10% below entry | Entry $100, stop $90-92 |
 | `*` LOW | 7-8% below entry | Entry $100, stop $92-93 |
-
-Stops should align with meaningful levels when possible (prior lows, moving averages). But if no meaningful level exists within the range, use the percentage rule.
 
 ### Trailing Stops
 After a position moves in your favor:

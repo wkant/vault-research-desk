@@ -133,7 +133,8 @@ def compute_correlation_matrix(tickers, returns_map):
 
     if HAS_NUMPY:
         # Align lengths to shortest series
-        min_len = min(len(returns_map[t]) for t in tickers)
+        lengths = [len(returns_map[t]) for t in tickers if t in returns_map]
+        min_len = min(lengths) if lengths else 0
         if min_len < 3:
             print("WARNING: Not enough overlapping data points for reliable correlations.", file=sys.stderr)
             for i in range(n):

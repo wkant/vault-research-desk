@@ -273,10 +273,21 @@ def main():
             print(f"  {alert}")
         triggered_count += sum(1 for a in portfolio_alerts if "⚠" in a)
 
+    # --- Alert escalation ---
+    critical = sum(1 for a in portfolio_alerts if "⚠" in a and ("CIRCUIT BREAKER" in a or "STOP HIT" in a))
+    moderate = sum(1 for a in portfolio_alerts if "⚠" in a) - critical
+
     print()
-    if triggered_count > 0:
+    if critical > 0:
+        print(f"ESCALATION: LEVEL 3 — {critical} CRITICAL alert(s)")
+        print(f"  Action: Run `flash` IMMEDIATELY for emergency assessment")
+    elif triggered_count > 2 or moderate > 0:
+        print(f"ESCALATION: LEVEL 2 — {triggered_count} alert(s) triggered")
+        print(f"  Action: Run `flash` for quick analysis within 24h")
+    elif triggered_count > 0:
         noun = "ALERT" if triggered_count == 1 else "ALERTS"
-        print(f"RESULT: {triggered_count} {noun} TRIGGERED. Run `flash` for quick analysis.")
+        print(f"ESCALATION: LEVEL 1 — {triggered_count} {noun}")
+        print(f"  Action: Note for next morning briefing")
     else:
         print("RESULT: No alerts triggered. All clear.")
     print()
@@ -344,6 +355,59 @@ def check_portfolio_health():
                     alerts.append(f"  [INFO] {ticker} earnings in {days_to} days ({ed})")
             except (ValueError, TypeError):
                 pass
+
+    # --- Individual position stop-loss checks ---
+    with VaultDB() as db:
+        trades = db.conn.execute("""
+            SELECT ticker, entry_price, stop_loss, conviction
+            FROM trades WHERE status='OPEN' AND stop_loss IS NOT NULL
+        """).fetchall()
+    for trade in trades:
+        ticker = trade['ticker']
+        stop = trade['stop_loss']
+        price = cached_quotes.get(ticker)
+        if not price:
+            q = fetch_quote(ticker)
+            if q and 'error' not in q:
+                price = q['price']
+        if price and stop:
+            if price <= stop:
+                alerts.append(f"  ⚠ STOP HIT: {ticker} at ${price:.2f} breached stop ${stop:.2f} — SELL NOW")
+            elif price <= stop * 1.03:  # within 3% of stop
+                alerts.append(f"  [WARN] {ticker} at ${price:.2f} — within 3% of stop ${stop:.2f}")
+
+    # --- Sector concentration check ---
+    if total_value > 0:
+        # Map ETFs to sectors; for stocks, use DB sector field or yfinance
+        etf_sector_map = {
+            "XLK": "Technology", "XLC": "Communication", "XLV": "Healthcare",
+            "XLE": "Energy", "XLF": "Financials", "XLY": "Cons Discretionary",
+            "XLP": "Cons Staples", "XLI": "Industrials", "XLB": "Materials",
+            "XLRE": "Real Estate", "XLU": "Utilities", "GLD": "Commodities",
+            "SLV": "Commodities", "VOO": "Broad Market", "SPY": "Broad Market",
+            "QQQ": "Technology", "IWM": "Broad Market",
+        }
+        sector_totals = {}
+        for ticker in port_tickers:
+            h = holdings.get(ticker, {})
+            shares = h.get("shares", 0)
+            price = cached_quotes.get(ticker, 0)
+            value = shares * price
+            # Try ETF map first, then DB sector, then fallback
+            sector = etf_sector_map.get(ticker)
+            if not sector:
+                db_h = next((r for r in db_holdings if r['ticker'] == ticker), None)
+                sector = db_h['sector'] if db_h and db_h['sector'] else "Uncategorized"
+            sector_totals[sector] = sector_totals.get(sector, 0) + value
+
+        for sector, value in sector_totals.items():
+            if sector in ("Broad Market", "Uncategorized"):
+                continue
+            pct = value / total_value * 100
+            if pct > 35:
+                alerts.append(f"  ⚠ SECTOR CONCENTRATION: {sector} at {pct:.0f}% (limit: 35%)")
+            elif pct > 30:
+                alerts.append(f"  [WARN] {sector} at {pct:.0f}% — approaching 35% sector limit")
 
     return alerts
 

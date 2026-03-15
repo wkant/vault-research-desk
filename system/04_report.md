@@ -26,6 +26,10 @@ Table from Research phase. Only events that could move prices.
 What changed? What calls were right/wrong? Scorecard table.
 Include benchmark: "Your portfolio: +X.X%. VOO over same period: +X.X%."
 
+### 3b. Search Log
+**Mandatory.** Include the Search Log table from `vault search-log` or `db.generate_search_log(tickers)`.
+Every ticker mentioned in the report must have a verified price row. If a ticker is missing → it cannot appear in recommendations.
+
 ### 4. Your Portfolio (ONLY when portfolio.md has holdings)
 | Stock | Shares | Cost | Current | P&L | Action |
 Grouped by urgency: SELL first, then HOLD, then BUY more.
@@ -34,6 +38,8 @@ Grouped by urgency: SELL first, then HOLD, then BUY more.
 ### 5. What to Buy
 Table from Strategy phase. Each pick with: ticker, conviction (asterisks), entry, stop, why, size.
 Include scaling guidance from system/05_position_mgmt.md.
+
+**Profit-taking reminders:** For existing holdings approaching profit-taking thresholds (+30%, +50%, +100% from entry), include a note per 05_position_mgmt.md rules. E.g., "XLE is +28% — approaching 25% trim threshold at +30%."
 
 
 <!-- AUTO-FIX: STOP-LOSS ENFORCEMENT -->
@@ -79,10 +85,29 @@ One short paragraph. Educational purposes only. Not financial advice.
 ---
 
 ## Devil's Gate Integration
-- All FLAGS visible as caveats or risk notes in the report
+**The Devil's Gate summary MUST appear in the report.** Include it as a collapsed section or summary table after "What to Avoid":
+
+```
+### Validation Summary (Devil's Gate)
+| Test | Result |
+|------|--------|
+| 0. Portfolio Reality | PASS |
+| 1. Thesis Flip | PASS/FLAG |
+| ... | ... |
+| 7. Omission Audit | PASS |
+
+**Status:** APPROVED / APPROVED WITH FLAGS
+**Doomsday:** [1 sentence]
+**Flags:** [list any flags with caveats]
+```
+
+Additionally:
+- All FLAGS visible as caveats or risk notes in the report body
 - Uncomfortable Questions woven into Biggest Risks or Chief's Corner
 - Doomsday Scenario mentioned in Biggest Risks
 - Conviction adjusted per Devil's Gate recommendations
+
+**Why:** Devil's Gate is the investor's assurance that adversarial validation happened. If the summary isn't in the report, the investor has no way to verify analysis was stress-tested.
 
 ## After Every Report (MANDATORY)
 1. Save as `reports/report_YYYY-MM-DD.md`

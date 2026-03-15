@@ -360,6 +360,27 @@ CREATE TABLE IF NOT EXISTS learnings (
     created_at  TEXT NOT NULL
 );
 
+-- Performance indices (query acceleration)
+CREATE INDEX IF NOT EXISTS idx_insider_ticker_date ON insider_txns(ticker, txn_date);
+CREATE INDEX IF NOT EXISTS idx_insider_ticker_type ON insider_txns(ticker, txn_type);
+CREATE INDEX IF NOT EXISTS idx_ark_ticker ON ark_trades(ticker);
+CREATE INDEX IF NOT EXISTS idx_ark_date ON ark_trades(date);
+CREATE INDEX IF NOT EXISTS idx_guru_ticker ON guru_holdings(ticker);
+CREATE INDEX IF NOT EXISTS idx_guru_code ON guru_holdings(guru_code);
+CREATE INDEX IF NOT EXISTS idx_news_ticker ON news(ticker);
+CREATE INDEX IF NOT EXISTS idx_news_published ON news(published);
+CREATE INDEX IF NOT EXISTS idx_learnings_ticker ON learnings(ticker);
+CREATE INDEX IF NOT EXISTS idx_learnings_category ON learnings(category);
+CREATE INDEX IF NOT EXISTS idx_improvements_status ON improvements(status);
+CREATE INDEX IF NOT EXISTS idx_theses_ticker ON theses(ticker);
+CREATE INDEX IF NOT EXISTS idx_theses_status ON theses(status);
+CREATE INDEX IF NOT EXISTS idx_watchlist_ticker ON watchlist(ticker);
+CREATE INDEX IF NOT EXISTS idx_watchlist_status ON watchlist(status);
+CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker);
+CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+CREATE INDEX IF NOT EXISTS idx_institutional_ticker ON institutional(ticker);
+CREATE INDEX IF NOT EXISTS idx_consensus_ticker ON consensus(ticker);
+
 -- Scorecard snapshots (track system performance over time)
 CREATE TABLE IF NOT EXISTS scorecards (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -443,13 +464,40 @@ class VaultDB:
         etfs = {"XLE", "XLV", "XLK", "XLF", "XLY", "XLP", "XLI", "XLB",
                 "XLRE", "XLU", "XLC", "GLD", "SLV", "VOO", "SPY", "QQQ", "IWM"}
 
+        # Sector mapping for common tickers and ETFs
+        sector_map = {
+            "XLK": "Technology", "XLC": "Communication", "XLV": "Healthcare",
+            "XLE": "Energy", "XLF": "Financials", "XLY": "Cons Discretionary",
+            "XLP": "Cons Staples", "XLI": "Industrials", "XLB": "Materials",
+            "XLRE": "Real Estate", "XLU": "Utilities", "GLD": "Commodities",
+            "SLV": "Commodities", "VOO": "Broad Market", "SPY": "Broad Market",
+            "QQQ": "Technology", "IWM": "Broad Market",
+            # Common individual stocks
+            "GOOGL": "Technology", "GOOG": "Technology", "AAPL": "Technology",
+            "MSFT": "Technology", "AMZN": "Cons Discretionary", "META": "Technology",
+            "NVDA": "Technology", "TSLA": "Cons Discretionary", "NFLX": "Communication",
+            "XOM": "Energy", "CVX": "Energy", "LMT": "Industrials",
+            "JPM": "Financials", "BAC": "Financials", "CFG": "Financials",
+            "JNJ": "Healthcare", "UNH": "Healthcare", "PFE": "Healthcare",
+        }
+
         for ticker in tickers:
             h = holdings.get(ticker, {})
+            sector = sector_map.get(ticker)
+            # Try yfinance for unknown sectors (only on sync, not hot path)
+            if not sector and ticker not in etfs:
+                try:
+                    import yfinance as yf
+                    info = yf.Ticker(ticker).info
+                    sector = info.get("sector")
+                except Exception:
+                    pass
             self.upsert_holding(
                 ticker=ticker,
                 shares=h.get("shares", 0),
                 cost_basis=h.get("cost", 0),
                 date_bought=h.get("date"),
+                sector=sector,
                 asset_type="etf" if ticker in etfs else "stock"
             )
 
@@ -1655,7 +1703,31 @@ class VaultDB:
                 actions.append(f"Review {l['ticker']} — {l['detail'][:50]}")
                 break  # Only one holding signal
 
-        # 5. Stale theses
+        # 5. Profit-taking thresholds on holdings (batch price fetch)
+        dashboard = self.portfolio_dashboard()
+        for h in dashboard:
+            ticker = h['ticker']
+            current = h['current_price'] or 0
+            entry_per_share = h['cost_basis'] or 0
+            if current > 0 and entry_per_share > 0:
+                gain_pct = (current - entry_per_share) / entry_per_share * 100
+                if gain_pct >= 100:
+                    actions.append(f"PROFIT-TAKE {ticker} — up {gain_pct:+.0f}%, sell half (house money rule)")
+                elif gain_pct >= 50:
+                    actions.append(f"PROFIT-TAKE {ticker} — up {gain_pct:+.0f}%, trim 25% more (50% rule)")
+                elif gain_pct >= 30:
+                    actions.append(f"PROFIT-TAKE {ticker} — up {gain_pct:+.0f}%, trim 25% (30% rule)")
+
+        # 6. Insider cluster buys (strong signal)
+        clusters = self.get_cluster_buys(days=60, min_insiders=2)
+        for c in clusters[:2]:
+            t = c['ticker']
+            if t in port_tickers:
+                actions.append(f"Insider cluster BUY in {t} — {c['num_insiders']} insiders bought recently")
+            else:
+                actions.append(f"Watch {t} — insider cluster buying ({c['num_insiders']} insiders)")
+
+        # 7. Stale theses
         stale_count = self.conn.execute("""
             SELECT count(*) as c FROM theses
             WHERE status='ACTIVE'
@@ -1664,18 +1736,99 @@ class VaultDB:
         if stale_count and stale_count['c'] > 0:
             actions.append(f"Review {stale_count['c']} stale theses (>90 days old)")
 
-        # 6. Under-diversified
+        # 8. Under-diversified
         if risk and risk.get('position_count', 0) < 6:
             actions.append(f"Only {risk['position_count']} positions — target is 6-8 for diversification")
 
-        # 7. VIX warning
+        # 9. VIX warning
         snap = self.conn.execute(
             "SELECT vix FROM market_snapshots ORDER BY date DESC LIMIT 1"
         ).fetchone()
         if snap and snap['vix'] and snap['vix'] > 30:
             actions.append(f"VIX at {snap['vix']:.0f} — elevated fear, be cautious with new buys")
 
+        # 10. Watchlist picks with strong smart money support
+        for l in strong_learnings[:5]:
+            if l['ticker'] and l['ticker'] not in port_tickers:
+                watchlist = self.conn.execute(
+                    "SELECT ticker FROM watchlist WHERE ticker=? AND status='ACTIVE'",
+                    (l['ticker'],)
+                ).fetchone()
+                if watchlist:
+                    actions.append(f"Watchlist {l['ticker']} has smart money support — {l['detail'][:40]}")
+                    break
+
         return actions
+
+    def get_thesis_relevant_news(self, days=3):
+        """Find recent news that may impact active theses."""
+        theses = self.get_active_theses()
+        thesis_tickers = {t['ticker'] for t in theses}
+        if not thesis_tickers:
+            return []
+
+        results = []
+        news = self.conn.execute("""
+            SELECT ticker, headline, sentiment, published
+            FROM news
+            WHERE published >= date('now', ?)
+            ORDER BY published DESC
+        """, (f'-{days} days',)).fetchall()
+
+        for n in news:
+            if n['ticker'] in thesis_tickers:
+                thesis = next((t for t in theses if t['ticker'] == n['ticker']), None)
+                if thesis:
+                    sentiment = n['sentiment'] or 0
+                    direction = thesis.get('direction', 'BUY')
+                    # Check if news contradicts thesis
+                    contradicts = (direction in ('BUY', 'HOLD') and sentiment < -0.3) or \
+                                  (direction in ('SELL', 'AVOID') and sentiment > 0.3)
+                    results.append({
+                        'ticker': n['ticker'],
+                        'headline': n['headline'],
+                        'sentiment': sentiment,
+                        'thesis_direction': direction,
+                        'contradicts': contradicts,
+                        'published': n['published'],
+                    })
+
+        return results
+
+    def generate_search_log(self, tickers):
+        """Generate a Search Log table from cached price data for report inclusion.
+
+        Returns a markdown-formatted Search Log string per 00_system.md requirements.
+        Tickers should include all tickers that will appear in the report.
+        """
+        # Batch fetch all prices in one query
+        placeholders = ",".join("?" * len(tickers))
+        rows = self.conn.execute(f"""
+            SELECT ticker, price, fetched_at FROM price_cache
+            WHERE ticker IN ({placeholders})
+            AND fetched_at = (
+                SELECT max(fetched_at) FROM price_cache p2
+                WHERE p2.ticker = price_cache.ticker
+            )
+        """, list(tickers)).fetchall()
+        price_map = {r['ticker']: r for r in rows}
+
+        lines = []
+        lines.append("### Search Log")
+        lines.append("")
+        lines.append("| # | Ticker | Verified Price | Source | Date |")
+        lines.append("|---|--------|---------------|--------|------|")
+
+        for i, ticker in enumerate(sorted(tickers), 1):
+            row = price_map.get(ticker)
+            if row and row['price']:
+                fetched = row['fetched_at'][:10]
+                lines.append(f"| {i} | {ticker} | ${row['price']:.2f} | data_fetcher.py | {fetched} |")
+            else:
+                lines.append(f"| {i} | {ticker} | NOT VERIFIED | — | — |")
+
+        lines.append("")
+        return "\n".join(lines)
 
     def morning_briefing(self):
         """One-command morning overview: portfolio + risk + theses + watchlist + learnings."""
@@ -1822,6 +1975,23 @@ class VaultDB:
         else:
             lines.append("  No new learnings. Run: learn_from_pros.py")
 
+        # ── Smart Money Divergence ──
+        divergences = self.detect_smart_money_divergence()
+        if divergences:
+            lines.append("")
+            lines.append(f"  CONTESTED THESES ({len(divergences)} tickers)")
+            lines.append(f"  {'─' * 52}")
+            for d in divergences[:4]:
+                bull = ','.join(d['bullish_sources'])
+                bear = ','.join(d['bearish_sources'])
+                lines.append(f"  {d['ticker']:<7} Bull({bull}) vs Bear({bear})")
+
+        # ── Regime ──
+        regime = self.detect_regime()
+        if regime['regime'] != 'UNKNOWN':
+            lines.append("")
+            lines.append(f"  REGIME: {regime['regime']} ({regime['confidence']}%) — {regime['posture']}")
+
         # ── Improvements (from self-analyze) ──
         improvements = self.get_active_improvements()
         high_priority = [i for i in improvements if i['priority'] == 'HIGH']
@@ -1887,10 +2057,11 @@ class VaultDB:
                 ticker = h['ticker']
                 current = h['current_price'] or 0
 
-                # Get price at report date from cache
+                # Get price at or before report date from cache
                 old_price_row = self.conn.execute("""
                     SELECT price FROM price_cache
-                    WHERE ticker=? AND date=?
+                    WHERE ticker=? AND date<=?
+                    ORDER BY date DESC
                     LIMIT 1
                 """, (ticker, report_date)).fetchone()
 
@@ -1993,6 +2164,606 @@ class VaultDB:
 
         lines.append(f"{'=' * 58}")
         lines.append("")
+        return "\n".join(lines)
+
+
+    # ------------------------------------------------------------------
+    # Portfolio drift analysis
+    # ------------------------------------------------------------------
+    def portfolio_drift(self):
+        """Calculate allocation drift from target weights."""
+        dashboard = self.portfolio_dashboard()
+        if not dashboard:
+            return None
+
+        total_value = sum((r['market_value'] or 0) for r in dashboard)
+        if total_value == 0:
+            return None
+
+        count = len(dashboard)
+        # Default target: equal-weight with 15% cash reserve
+        invested_target = 85.0
+        per_position_target = invested_target / count if count else 0
+
+        positions = []
+        for h in dashboard:
+            mv = h['market_value'] or 0
+            actual_pct = mv / total_value * 100 if total_value else 0
+            drift = actual_pct - per_position_target
+            positions.append({
+                'ticker': h['ticker'],
+                'shares': h['shares'],
+                'cost_basis': h['cost_basis'],
+                'current_price': h['current_price'] or 0,
+                'market_value': mv,
+                'actual_pct': actual_pct,
+                'target_pct': per_position_target,
+                'drift_pct': drift,
+                'action': 'TRIM' if drift > 5 else 'ADD' if drift < -5 else 'OK',
+            })
+
+        positions.sort(key=lambda x: x['drift_pct'], reverse=True)
+        return {
+            'positions': positions,
+            'total_value': total_value,
+            'target_per_position': per_position_target,
+        }
+
+    # ------------------------------------------------------------------
+    # Position sizing calculator
+    # ------------------------------------------------------------------
+    def calculate_position_size(self, ticker, conviction, entry_price=None):
+        """Calculate optimal position size for a new buy."""
+        risk = self.risk_dashboard()
+        if not risk:
+            return None
+
+        total_value = risk['total_value']
+        total_cost = risk['total_cost']
+
+        # Conviction limits
+        max_pct = {'***': 18, '**': 12, '*': 7}.get(conviction, 12)
+
+        # Current exposure to this ticker
+        existing = self.get_holding(ticker)
+        existing_value = 0
+        if existing:
+            cached = self.get_cached_quote(ticker, max_age_minutes=1440)
+            if cached and cached.get('price'):
+                existing_value = existing['shares'] * cached['price']
+
+        existing_pct = existing_value / total_value * 100 if total_value else 0
+        available_pct = max(0, max_pct - existing_pct)
+        max_investment = total_value * available_pct / 100
+
+        # Scaling rules based on portfolio size
+        if total_value < 10000:
+            tranches = [('Tranche 1 (50%)', 0.50), ('Tranche 2 (50%)', 0.50)]
+        elif total_value < 50000:
+            tranches = [('Tranche 1 (40%)', 0.40), ('Tranche 2 (30%)', 0.30), ('Tranche 3 (30%)', 0.30)]
+        else:
+            tranches = [('Tranche 1 (30%)', 0.30), ('Tranche 2 (25%)', 0.25),
+                        ('Tranche 3 (25%)', 0.25), ('Tranche 4 (20%)', 0.20)]
+
+        # Stop-loss distances by conviction
+        stop_pct = {'***': 0.11, '**': 0.09, '*': 0.075}.get(conviction, 0.09)
+
+        result = {
+            'ticker': ticker,
+            'conviction': conviction,
+            'entry_price': entry_price,
+            'max_position_pct': max_pct,
+            'existing_pct': existing_pct,
+            'available_pct': available_pct,
+            'max_investment': max_investment,
+            'stop_distance_pct': stop_pct * 100,
+            'tranches': [],
+            'portfolio_value': total_value,
+        }
+
+        if entry_price:
+            result['stop_price'] = round(entry_price * (1 - stop_pct), 2)
+            for label, pct in tranches:
+                amount = max_investment * pct
+                shares = amount / entry_price if entry_price > 0 else 0
+                result['tranches'].append({
+                    'label': label,
+                    'amount': round(amount, 2),
+                    'shares': round(shares, 4),
+                })
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Watchlist conversion
+    # ------------------------------------------------------------------
+    def convert_watchlist_to_trade(self, ticker, price, shares):
+        """Convert a watchlist pick to an active trade."""
+        today = date.today().isoformat()
+
+        # Find active watchlist entry
+        wl = self.conn.execute("""
+            SELECT * FROM watchlist WHERE ticker=? AND status='ACTIVE'
+            ORDER BY date DESC LIMIT 1
+        """, (ticker,)).fetchone()
+
+        if wl:
+            self.conn.execute(
+                "UPDATE watchlist SET status='CONVERTED' WHERE id=?",
+                (wl['id'],)
+            )
+
+        # Add trade
+        self.add_trade(
+            date=today,
+            ticker=ticker,
+            action='BUY',
+            entry_price=price,
+            conviction=wl['conviction'] if wl else '**',
+            status='OPEN',
+            notes=f"Converted from watchlist (rec'd ${wl['price_at_rec']:.2f})" if wl else "Manual entry",
+        )
+        self.conn.commit()
+
+        return {
+            'ticker': ticker,
+            'price': price,
+            'shares': shares,
+            'from_watchlist': bool(wl),
+            'rec_price': wl['price_at_rec'] if wl else None,
+        }
+
+    # ------------------------------------------------------------------
+    # Trade journal
+    # ------------------------------------------------------------------
+    def add_journal_entry(self, ticker, trade_id=None, reflection=None,
+                          what_happened=None, lesson=None):
+        """Add a journal entry for a trade."""
+        today = date.today().isoformat()
+
+        # Store as thesis_history if we have a thesis, else as improvement
+        self.conn.execute("""
+            INSERT INTO improvements (date, type, category, priority, finding,
+                action, target_file, status, source, meta, created_at)
+            VALUES (?, 'journal', 'reflection', 'LOW', ?, ?, NULL, 'active', ?, ?, ?)
+        """, (today, reflection or f"Journal entry for {ticker}",
+              lesson or "", ticker,
+              json.dumps({'ticker': ticker, 'trade_id': trade_id,
+                         'what_happened': what_happened}),
+              datetime.now().isoformat()))
+        self.conn.commit()
+
+    def get_journal_entries(self, ticker=None, limit=20):
+        """Get journal entries, optionally filtered by ticker."""
+        if ticker:
+            return self.conn.execute("""
+                SELECT * FROM improvements
+                WHERE type='journal' AND source=?
+                ORDER BY date DESC LIMIT ?
+            """, (ticker, limit)).fetchall()
+        return self.conn.execute("""
+            SELECT * FROM improvements WHERE type='journal'
+            ORDER BY date DESC LIMIT ?
+        """, (limit,)).fetchall()
+
+    # ------------------------------------------------------------------
+    # Smart money divergence detection
+    # ------------------------------------------------------------------
+    def detect_smart_money_divergence(self):
+        """Find tickers where smart money sources disagree."""
+        divergences = []
+
+        # Get all tickers with multiple signals
+        tickers_with_signals = self.conn.execute("""
+            SELECT DISTINCT ticker FROM learnings
+            WHERE consumed=0 AND ticker IS NOT NULL
+        """).fetchall()
+
+        for row in tickers_with_signals:
+            ticker = row['ticker']
+            signals = self.conn.execute("""
+                SELECT signal_type, direction, strength, detail
+                FROM learnings
+                WHERE ticker=? AND consumed=0
+                ORDER BY created_at DESC
+            """, (ticker,)).fetchall()
+
+            if len(signals) < 2:
+                continue
+
+            bullish = [s for s in signals if s['direction'] == 'BULLISH']
+            bearish = [s for s in signals if s['direction'] == 'BEARISH']
+
+            if bullish and bearish:
+                bull_sources = set(s['signal_type'] for s in bullish)
+                bear_sources = set(s['signal_type'] for s in bearish)
+                divergences.append({
+                    'ticker': ticker,
+                    'bullish_sources': list(bull_sources),
+                    'bearish_sources': list(bear_sources),
+                    'bull_detail': bullish[0]['detail'][:60],
+                    'bear_detail': bearish[0]['detail'][:60],
+                })
+
+        return divergences
+
+    # ------------------------------------------------------------------
+    # Portfolio simulation
+    # ------------------------------------------------------------------
+    def simulate_additions(self, new_positions):
+        """Simulate adding new positions and show resulting portfolio.
+
+        new_positions: list of {'ticker': str, 'amount': float}
+        """
+        dashboard = self.portfolio_dashboard()
+        total_value = sum((r['market_value'] or 0) for r in dashboard)
+
+        # Current positions
+        positions = []
+        for h in dashboard:
+            positions.append({
+                'ticker': h['ticker'],
+                'current_value': h['market_value'] or 0,
+                'current_pct': (h['market_value'] or 0) / total_value * 100 if total_value else 0,
+                'is_new': False,
+            })
+
+        # Add new positions
+        added_total = sum(p['amount'] for p in new_positions)
+        new_total = total_value + added_total
+
+        for np in new_positions:
+            existing = next((p for p in positions if p['ticker'] == np['ticker']), None)
+            if existing:
+                existing['current_value'] += np['amount']
+                existing['is_new'] = False  # addition to existing
+            else:
+                positions.append({
+                    'ticker': np['ticker'],
+                    'current_value': np['amount'],
+                    'current_pct': 0,
+                    'is_new': True,
+                })
+
+        # Recalculate percentages
+        for p in positions:
+            p['new_pct'] = p['current_value'] / new_total * 100 if new_total else 0
+            p['change_pct'] = p['new_pct'] - p['current_pct']
+
+        positions.sort(key=lambda x: x['new_pct'], reverse=True)
+
+        # Check violations
+        violations = []
+        for p in positions:
+            if p['new_pct'] > 18:
+                violations.append(f"{p['ticker']} would be {p['new_pct']:.1f}% (max 18%)")
+            elif p['new_pct'] > 15 and p.get('is_new'):
+                violations.append(f"New position {p['ticker']} at {p['new_pct']:.1f}% (max 15% for new)")
+
+        return {
+            'current_total': total_value,
+            'added': added_total,
+            'new_total': new_total,
+            'positions': positions,
+            'violations': violations,
+            'position_count': len(positions),
+        }
+
+    # ------------------------------------------------------------------
+    # Report comparison
+    # ------------------------------------------------------------------
+    def compare_reports(self, date1, date2):
+        """Compare two reports by date string."""
+        theses1 = self.conn.execute("""
+            SELECT ticker, direction, conviction, thesis
+            FROM theses WHERE source_report LIKE ?
+        """, (f"%{date1}%",)).fetchall()
+
+        theses2 = self.conn.execute("""
+            SELECT ticker, direction, conviction, thesis
+            FROM theses WHERE source_report LIKE ?
+        """, (f"%{date2}%",)).fetchall()
+
+        tickers1 = {r['ticker']: dict(r) for r in theses1}
+        tickers2 = {r['ticker']: dict(r) for r in theses2}
+
+        all_tickers = set(tickers1.keys()) | set(tickers2.keys())
+
+        changes = []
+        for t in sorted(all_tickers):
+            old = tickers1.get(t)
+            new = tickers2.get(t)
+            if old and not new:
+                changes.append({'ticker': t, 'type': 'DROPPED', 'old': old, 'new': None})
+            elif new and not old:
+                changes.append({'ticker': t, 'type': 'NEW', 'old': None, 'new': new})
+            elif old and new:
+                if old['direction'] != new['direction']:
+                    changes.append({'ticker': t, 'type': 'FLIPPED', 'old': old, 'new': new})
+                elif old['conviction'] != new['conviction']:
+                    changes.append({'ticker': t, 'type': 'CONVICTION_CHANGE', 'old': old, 'new': new})
+                else:
+                    changes.append({'ticker': t, 'type': 'UNCHANGED', 'old': old, 'new': new})
+
+        # Benchmark comparison
+        bench1 = self.conn.execute(
+            "SELECT * FROM benchmarks WHERE date<=? ORDER BY date DESC LIMIT 1",
+            (date1,)).fetchone()
+        bench2 = self.conn.execute(
+            "SELECT * FROM benchmarks WHERE date<=? ORDER BY date DESC LIMIT 1",
+            (date2,)).fetchone()
+
+        return {
+            'date1': date1,
+            'date2': date2,
+            'changes': changes,
+            'bench1': dict(bench1) if bench1 else None,
+            'bench2': dict(bench2) if bench2 else None,
+        }
+
+    # ------------------------------------------------------------------
+    # Regime detection
+    # ------------------------------------------------------------------
+    def detect_regime(self):
+        """Classify current market regime from latest snapshot data."""
+        snap = self.conn.execute(
+            "SELECT * FROM market_snapshots ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        if not snap:
+            return {'regime': 'UNKNOWN', 'signals': [], 'confidence': 0}
+
+        signals = []
+        risk_on = 0
+        risk_off = 0
+
+        vix = snap['vix'] or 0
+        if vix < 15:
+            signals.append(('VIX', f'{vix:.0f}', 'Low volatility', 'RISK-ON'))
+            risk_on += 2
+        elif vix > 25:
+            signals.append(('VIX', f'{vix:.0f}', 'Elevated fear', 'RISK-OFF'))
+            risk_off += 2
+        else:
+            signals.append(('VIX', f'{vix:.0f}', 'Normal range', 'NEUTRAL'))
+
+        breadth = snap['breadth_200'] or 0
+        if breadth > 70:
+            signals.append(('Breadth', f'{breadth:.0f}%', 'Healthy participation', 'RISK-ON'))
+            risk_on += 2
+        elif breadth < 40:
+            signals.append(('Breadth', f'{breadth:.0f}%', 'Narrow/Bear-like', 'RISK-OFF'))
+            risk_off += 2
+        else:
+            signals.append(('Breadth', f'{breadth:.0f}%', 'Weakening', 'CAUTION'))
+            risk_off += 1
+
+        ten_y = snap['ten_year'] or 0
+        if ten_y > 5.0:
+            signals.append(('10Y Yield', f'{ten_y:.2f}%', 'Restrictive', 'RISK-OFF'))
+            risk_off += 1
+        elif ten_y < 3.5:
+            signals.append(('10Y Yield', f'{ten_y:.2f}%', 'Accommodative', 'RISK-ON'))
+            risk_on += 1
+
+        oil = snap['oil'] or 0
+        if oil > 90:
+            signals.append(('Oil', f'${oil:.0f}', 'Inflationary pressure', 'RISK-OFF'))
+            risk_off += 1
+        elif oil < 60:
+            signals.append(('Oil', f'${oil:.0f}', 'Deflationary', 'RISK-ON'))
+            risk_on += 1
+
+        dxy = snap['dxy'] or 0
+        if dxy > 105:
+            signals.append(('DXY', f'{dxy:.1f}', 'Strong dollar (EM drag)', 'RISK-OFF'))
+            risk_off += 1
+        elif dxy < 95:
+            signals.append(('DXY', f'{dxy:.1f}', 'Weak dollar (risk assets up)', 'RISK-ON'))
+            risk_on += 1
+
+        total = risk_on + risk_off
+        if total == 0:
+            regime = 'NEUTRAL'
+            confidence = 50
+        elif risk_on > risk_off * 1.5:
+            regime = 'RISK-ON'
+            confidence = min(95, int(risk_on / total * 100))
+        elif risk_off > risk_on * 1.5:
+            regime = 'RISK-OFF'
+            confidence = min(95, int(risk_off / total * 100))
+        else:
+            regime = 'TRANSITION'
+            confidence = 50
+
+        posture = {
+            'RISK-ON': 'Offensive — favor growth, reduce cash',
+            'RISK-OFF': 'Defensive — raise cash, favor value/staples',
+            'TRANSITION': 'Balanced — maintain positions, tighten stops',
+            'NEUTRAL': 'Standard allocation per risk tolerance',
+        }
+
+        return {
+            'regime': regime,
+            'confidence': confidence,
+            'signals': signals,
+            'posture': posture.get(regime, ''),
+            'date': snap['date'],
+            'risk_on_score': risk_on,
+            'risk_off_score': risk_off,
+        }
+
+    # ------------------------------------------------------------------
+    # Backtesting
+    # ------------------------------------------------------------------
+    def backtest_recommendations(self, conviction_filter=None):
+        """Backtest all closed trades by conviction level."""
+        where = "WHERE status IN ('CLOSED', 'HIT_TARGET', 'STOPPED_OUT')"
+        params = []
+        if conviction_filter:
+            where += " AND conviction=?"
+            params.append(conviction_filter)
+
+        trades = self.conn.execute(f"""
+            SELECT * FROM trades {where} ORDER BY date
+        """, params).fetchall()
+
+        if not trades:
+            return None
+
+        results = {
+            'total': len(trades),
+            'by_conviction': {},
+            'by_year': {},
+            'cumulative_return': 0,
+            'max_drawdown': 0,
+            'trades': [],
+        }
+
+        cumulative = 0
+        peak = 0
+        max_dd = 0
+
+        for t in trades:
+            ret = t['return_pct'] or 0
+            cumulative += ret
+            peak = max(peak, cumulative)
+            dd = cumulative - peak
+            max_dd = min(max_dd, dd)
+
+            conv = t['conviction'] or '**'
+            if conv not in results['by_conviction']:
+                results['by_conviction'][conv] = {'count': 0, 'wins': 0, 'total_return': 0, 'returns': []}
+            bucket = results['by_conviction'][conv]
+            bucket['count'] += 1
+            if ret > 0:
+                bucket['wins'] += 1
+            bucket['total_return'] += ret
+            bucket['returns'].append(ret)
+
+            year = t['date'][:4]
+            if year not in results['by_year']:
+                results['by_year'][year] = {'count': 0, 'total_return': 0}
+            results['by_year'][year]['count'] += 1
+            results['by_year'][year]['total_return'] += ret
+
+        results['cumulative_return'] = cumulative
+        results['max_drawdown'] = max_dd
+
+        for conv, b in results['by_conviction'].items():
+            b['win_rate'] = b['wins'] / b['count'] * 100 if b['count'] else 0
+            b['avg_return'] = b['total_return'] / b['count'] if b['count'] else 0
+
+        return results
+
+    # ------------------------------------------------------------------
+    # Peer comparison
+    # ------------------------------------------------------------------
+    def peer_comparison(self):
+        """Compare portfolio against top institutional investors."""
+        dashboard = self.portfolio_dashboard()
+        my_tickers = {h['ticker'] for h in dashboard}
+
+        peers = {}
+        gurus = self.conn.execute("""
+            SELECT DISTINCT guru_code, guru_name FROM guru_holdings
+        """).fetchall()
+
+        for g in gurus:
+            holdings = self.conn.execute("""
+                SELECT ticker, pct_portfolio FROM guru_holdings
+                WHERE guru_code=?
+                ORDER BY pct_portfolio DESC
+            """, (g['guru_code'],)).fetchall()
+
+            guru_tickers = {h['ticker'] for h in holdings}
+            overlap = my_tickers & guru_tickers
+            peers[g['guru_name'] or g['guru_code']] = {
+                'total_positions': len(holdings),
+                'overlap': list(overlap),
+                'overlap_count': len(overlap),
+                'top5': [(h['ticker'], h['pct_portfolio']) for h in holdings[:5]],
+            }
+
+        # ARK overlap
+        ark = self.conn.execute("""
+            SELECT DISTINCT ticker FROM ark_trades
+            WHERE direction='Buy'
+            AND date >= date('now', '-30 days')
+        """).fetchall()
+        ark_tickers = {r['ticker'] for r in ark}
+        ark_overlap = my_tickers & ark_tickers
+        if ark_tickers:
+            peers['ARK Invest (recent buys)'] = {
+                'total_positions': len(ark_tickers),
+                'overlap': list(ark_overlap),
+                'overlap_count': len(ark_overlap),
+                'top5': [],
+            }
+
+        return peers
+
+    # ------------------------------------------------------------------
+    # Report template pre-fill
+    # ------------------------------------------------------------------
+    def generate_report_skeleton(self):
+        """Generate a pre-filled report skeleton with data from DB."""
+        now = datetime.now()
+        lines = []
+
+        lines.append(f"# Vault Research Desk — Weekly Report")
+        lines.append(f"## {now.strftime('%B %d, %Y')}")
+        lines.append("")
+
+        # Search Log
+        holdings = self.get_holdings()
+        watchlist = self.get_active_watchlist()
+        all_tickers = set(h['ticker'] for h in holdings)
+        all_tickers.update(w['ticker'] for w in watchlist)
+        lines.append(self.generate_search_log(all_tickers))
+
+        # Portfolio section
+        dashboard = self.portfolio_dashboard()
+        if dashboard:
+            lines.append("### Your Portfolio")
+            lines.append("")
+            lines.append("| Stock | Shares | Cost | Current | P&L | Action |")
+            lines.append("|-------|--------|------|---------|-----|--------|")
+            for h in dashboard:
+                pnl = f"{h['pnl_pct'] or 0:+.1f}%" if h['pnl_pct'] else "n/a"
+                price = f"${h['current_price']:.2f}" if h['current_price'] else "—"
+                lines.append(f"| {h['ticker']} | {h['shares']:.4f} | ${h['cost_basis']:.2f} | {price} | {pnl} | **HOLD** |")
+            lines.append("")
+
+        # Benchmark
+        bench = self.conn.execute(
+            "SELECT * FROM benchmarks ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        if bench:
+            lines.append(f"Portfolio since inception: {bench['portfolio_pct']:+.2f}%")
+            lines.append(f"VOO over same period: {bench['voo_pct']:+.2f}%")
+            lines.append("")
+
+        # Regime
+        regime = self.detect_regime()
+        if regime['regime'] != 'UNKNOWN':
+            lines.append(f"### Market Regime: {regime['regime']} ({regime['confidence']}% confidence)")
+            lines.append(f"Posture: {regime['posture']}")
+            lines.append("")
+
+        # Placeholders
+        for section in ["### What's Happening", "### This Week",
+                        "### What to Buy", "### What to Avoid",
+                        "### Biggest Risks", "### Chief's Corner",
+                        "### Gut Check", "### Validation Summary (Devil's Gate)",
+                        "### Alert Conditions", "### Bottom Line"]:
+            lines.append(section)
+            lines.append("")
+            lines.append("*[TODO: Fill in]*")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("*Disclaimer: Educational purposes only. Not financial advice.*")
+
         return "\n".join(lines)
 
 

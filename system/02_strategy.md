@@ -94,10 +94,12 @@ For each pick:
 | Size | Dollar amount and % of available capital |
 | What changes this call | Specific trigger to exit |
 
-**Entry zone rules:**
-- Must be within 5% of verified price (unless you're setting a limit order with explicit justification)
+**Entry zone rules (see unified rules in 00_system.md):**
+- Within 5% of verified price = PASS
+- 5-7% gap = FLAG (requires justification: limit order, expected pullback)
+- >7% gap = REJECT (auto-reject unless extraordinary circumstances)
 - Stop < entry < target (always)
-- Risk/reward minimum 2:1 for `**` picks, 1.5:1 for `***` picks
+- Risk/reward minimum 2:1 for all picks (`***` and `**`), 1.5:1 acceptable for `*` speculative only
 - Use tools/data_fetcher.py technicals (50/200 DMA, RSI) for level-setting
 - Do NOT claim to see "chart patterns" — you can't see charts
 
@@ -111,6 +113,13 @@ Sectors or stocks to stay away from. One sentence each with specific reason.
 
 ### 7. Cash Allocation
 How much to keep in cash from available capital, and why.
+
+**Decision framework (based on portfolio.md risk tolerance + current conditions):**
+- Read target cash range from 00_system.md Position Sizing table (Conservative: 25-30%, Moderate: 15-20%, Aggressive: 5-10%)
+- **Increase cash** toward the high end if: VIX > 25, major event within 7 days (FOMC, earnings), market down >5% in 2 weeks
+- **Decrease cash** toward the low end if: VIX < 15, strong breadth (>70% above 200 DMA), no major events
+- Always maintain at least 10% cash reserve per 05_position_mgmt.md
+- Justify the specific % chosen in the report
 
 ### 8. Thesis Change Triggers
 3-5 specific, measurable conditions that would flip your calls. Format:

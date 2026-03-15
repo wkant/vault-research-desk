@@ -295,6 +295,9 @@ tbody tr:hover td {
     background: #f0f4f8;
 }
 
+/* Numeric cells: right-align prices, percentages, numbers */
+td.num-right { text-align: right; font-variant-numeric: tabular-nums; }
+
 /* --- Conviction indicators --- */
 
 .conviction {
@@ -429,6 +432,8 @@ td:first-child {
     th, td { padding: 6px 10px; }
     .market-data { background: #f8f8f8; }
     .callout { break-inside: avoid; }
+    .table-wrap { break-inside: avoid; }
+    h2, h3 { break-after: avoid; }
     .footer { font-size: 9px; }
 }
 
