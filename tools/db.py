@@ -1604,6 +1604,79 @@ class VaultDB:
             'over_concentrated': [c for c in concentrations if c['over_limit']],
         }
 
+    def _generate_action_items(self):
+        """Synthesize all signals into specific action items."""
+        actions = []
+
+        # 1. Concentration warnings
+        risk = self.risk_dashboard()
+        if risk:
+            over = risk.get('over_concentrated', [])
+            worst = max(over, key=lambda c: c['pct']) if over else None
+            if worst and worst['pct'] > 30:
+                actions.append(f"TRIM {worst['ticker']} — {worst['pct']:.0f}% allocation (limit: 15%)")
+            elif worst and worst['pct'] > 15:
+                actions.append(f"Consider trimming {worst['ticker']} ({worst['pct']:.0f}% vs 15% limit)")
+
+            # Circuit breaker
+            if risk.get('circuit_breaker'):
+                actions.insert(0, "CIRCUIT BREAKER — portfolio down >15%, raise cash to 30%+")
+
+        # 2. Data freshness
+        latest = self.conn.execute(
+            "SELECT max(fetched_at) as latest FROM price_cache"
+        ).fetchone()
+        if latest and latest['latest']:
+            fetched = datetime.fromisoformat(latest['latest'])
+            age_hours = (datetime.now() - fetched).total_seconds() / 3600
+            if age_hours > 48:
+                actions.append(f"Run `vault fetch` — data is {age_hours:.0f}h stale")
+
+        # 3. Report freshness
+        last_report = self.conn.execute(
+            "SELECT date FROM reports ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        if last_report:
+            days_since = (datetime.now().date() - datetime.strptime(
+                last_report['date'], '%Y-%m-%d').date()).days
+            if days_since >= 7:
+                actions.append(f"Run `report` — last report was {days_since} days ago")
+
+        # 4. Strong smart money signals on holdings
+        holdings = self.get_holdings()
+        port_tickers = {h['ticker'] for h in holdings}
+        strong_learnings = self.conn.execute("""
+            SELECT ticker, detail FROM learnings
+            WHERE consumed=0 AND strength='STRONG' AND ticker IS NOT NULL
+            ORDER BY created_at DESC
+        """).fetchall()
+        for l in strong_learnings[:3]:
+            if l['ticker'] in port_tickers:
+                actions.append(f"Review {l['ticker']} — {l['detail'][:50]}")
+                break  # Only one holding signal
+
+        # 5. Stale theses
+        stale_count = self.conn.execute("""
+            SELECT count(*) as c FROM theses
+            WHERE status='ACTIVE'
+              AND julianday('now') - julianday(date_opened) > 90
+        """).fetchone()
+        if stale_count and stale_count['c'] > 0:
+            actions.append(f"Review {stale_count['c']} stale theses (>90 days old)")
+
+        # 6. Under-diversified
+        if risk and risk.get('position_count', 0) < 6:
+            actions.append(f"Only {risk['position_count']} positions — target is 6-8 for diversification")
+
+        # 7. VIX warning
+        snap = self.conn.execute(
+            "SELECT vix FROM market_snapshots ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        if snap and snap['vix'] and snap['vix'] > 30:
+            actions.append(f"VIX at {snap['vix']:.0f} — elevated fear, be cautious with new buys")
+
+        return actions
+
     def morning_briefing(self):
         """One-command morning overview: portfolio + risk + theses + watchlist + learnings."""
         now = datetime.now()
@@ -1613,6 +1686,15 @@ class VaultDB:
         lines.append(f"{'=' * 58}")
         lines.append(f"  MORNING BRIEFING — {now.strftime('%A, %B %d %Y  %H:%M')}")
         lines.append(f"{'=' * 58}")
+
+        # ── Action Items (synthesized from all signals) ──
+        actions = self._generate_action_items()
+        if actions:
+            lines.append("")
+            lines.append(f"  ACTION ITEMS")
+            lines.append(f"  {'─' * 52}")
+            for i, action in enumerate(actions[:5], 1):
+                lines.append(f"  {i}. {action}")
 
         # ── Market Snapshot ──
         snap = self.conn.execute(
