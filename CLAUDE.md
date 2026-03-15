@@ -13,7 +13,7 @@ A personal investment research system with 4 analysis phases, adversarial valida
 - `rebalance` → portfolio drift check
 - `sync [file]` → import IBKR CSV export into portfolio.md
 - `self-analyze` → system self-review: mistakes, patterns, improvements
-- `learn-from-pros` → fetch hedge fund 13F data, analyze patterns, improve system files
+- `learn-from-pros` → fetch smart money data from 5 sources, cross-reference portfolio, save learnings to DB
 
 ## Project Structure
 ```
@@ -36,7 +36,7 @@ vault_research_desk/
 │   ├── alerts.py              ← Alert condition monitor
 │   ├── ibkr_sync.py           ← IBKR CSV → portfolio.md sync
 │   ├── self_analyze.py         ← Self-improvement analysis engine
-│   ├── learn_from_pros.py     ← 13F hedge fund analysis → system improvements
+│   ├── learn_from_pros.py     ← Smart money learning engine (5 sources → portfolio learnings)
 │   ├── thesis_tracker.py      ← Track investment theses, detect flip-flops
 │   ├── correlation.py         ← Portfolio correlation matrix + risk score
 │   ├── insider_check.py       ← SEC Form 4 insider buying/selling signals
@@ -107,8 +107,10 @@ python3 tools/scorer.py                          # Performance scorecard
 python3 tools/alerts.py                          # Check alert conditions
 python3 tools/alerts.py reports/report_2026-03-11.md  # Check specific report
 python3 tools/self_analyze.py                    # Self-improvement analysis
-python3 tools/learn_from_pros.py                 # Fetch 13F data (16 funds), learn, improve system
-python3 tools/learn_from_pros.py --cleanup       # Delete fetched data after learning
+python3 tools/learn_from_pros.py                 # Fetch 5 sources, cross-ref portfolio, save learnings
+python3 tools/learn_from_pros.py --analyze       # Analyze cached data only (no API calls)
+python3 tools/learn_from_pros.py --summary       # Show latest learnings summary
+python3 tools/learn_from_pros.py --cleanup       # Clear learnings from DB
 python3 tools/thesis_tracker.py                  # Show all active theses
 python3 tools/thesis_tracker.py extract reports/report_YYYY-MM-DD.md  # Extract theses from report
 python3 tools/thesis_tracker.py check            # Check for stale/flipped theses

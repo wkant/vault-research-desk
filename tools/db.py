@@ -342,6 +342,23 @@ CREATE TABLE IF NOT EXISTS improvements (
     meta        TEXT,                       -- JSON blob for extra structured data
     created_at  TEXT NOT NULL
 );
+
+-- Smart money learnings (from learn_from_pros real analysis)
+CREATE TABLE IF NOT EXISTS learnings (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date    TEXT NOT NULL,
+    category    TEXT NOT NULL,              -- 'portfolio_signal', 'new_candidate', 'change_detected',
+                                           -- 'risk_flag', 'missed_opportunity'
+    ticker      TEXT,                       -- NULL for portfolio-wide learnings
+    signal_type TEXT,                       -- '13f', 'ark', 'insider', 'guru', 'analyst', 'cross_source'
+    direction   TEXT,                       -- 'BULLISH', 'BEARISH', 'NEUTRAL', 'MIXED'
+    strength    TEXT,                       -- 'STRONG', 'MODERATE', 'WEAK'
+    detail      TEXT NOT NULL,              -- Human-readable finding
+    data        TEXT,                       -- JSON blob with structured data
+    relevance   TEXT,                       -- 'HOLDING', 'WATCHLIST', 'NEW_CANDIDATE', 'PORTFOLIO_WIDE'
+    consumed    INTEGER DEFAULT 0,          -- 1 after report generator reads it
+    created_at  TEXT NOT NULL
+);
 """
 
 # ---------------------------------------------------------------------------
@@ -1238,6 +1255,132 @@ class VaultDB:
             "SELECT * FROM sector_performance WHERE date=? ORDER BY rank",
             (d,)
         ).fetchall()
+
+    # ------------------------------------------------------------------
+    # Learnings (from learn_from_pros real analysis)
+    # ------------------------------------------------------------------
+    def add_learning(self, run_date, category, detail, ticker=None, signal_type=None,
+                     direction=None, strength=None, data=None, relevance=None):
+        """Insert a single learning from the learning engine."""
+        self.conn.execute("""
+            INSERT INTO learnings
+            (run_date, category, ticker, signal_type, direction, strength,
+             detail, data, relevance, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (run_date, category, ticker, signal_type, direction, strength,
+              detail, json.dumps(data) if data else None, relevance,
+              datetime.now().isoformat()))
+        self.conn.commit()
+
+    def clear_learnings(self, run_date=None):
+        """Clear learnings for a specific run date, or all unconsumed."""
+        if run_date:
+            self.conn.execute("DELETE FROM learnings WHERE run_date=?", (run_date,))
+        else:
+            self.conn.execute("DELETE FROM learnings WHERE consumed=0")
+        self.conn.commit()
+
+    def get_unconsumed_learnings(self, limit=50):
+        """Get learnings not yet consumed by report generator."""
+        return self.conn.execute("""
+            SELECT * FROM learnings WHERE consumed=0
+            ORDER BY
+                CASE strength WHEN 'STRONG' THEN 1 WHEN 'MODERATE' THEN 2 ELSE 3 END,
+                CASE category
+                    WHEN 'risk_flag' THEN 1
+                    WHEN 'portfolio_signal' THEN 2
+                    WHEN 'change_detected' THEN 3
+                    WHEN 'new_candidate' THEN 4
+                    ELSE 5 END,
+                created_at DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+
+    def get_learnings_for_ticker(self, ticker):
+        """Get all unconsumed learnings for a specific ticker."""
+        return self.conn.execute("""
+            SELECT * FROM learnings
+            WHERE ticker=? AND consumed=0
+            ORDER BY
+                CASE strength WHEN 'STRONG' THEN 1 WHEN 'MODERATE' THEN 2 ELSE 3 END,
+                created_at DESC
+        """, (ticker,)).fetchall()
+
+    def mark_learnings_consumed(self, learning_ids=None):
+        """Mark learnings as consumed after report generation."""
+        if learning_ids:
+            placeholders = ",".join("?" * len(learning_ids))
+            self.conn.execute(
+                f"UPDATE learnings SET consumed=1 WHERE id IN ({placeholders})",
+                tuple(learning_ids))
+        else:
+            self.conn.execute("UPDATE learnings SET consumed=1 WHERE consumed=0")
+        self.conn.commit()
+
+    def get_learnings_summary(self):
+        """Formatted summary for report consumption.
+        Returns a string with portfolio-specific smart money insights."""
+        rows = self.get_unconsumed_learnings(limit=50)
+        if not rows:
+            return "No new smart money learnings available. Run: python3 tools/learn_from_pros.py"
+
+        lines = []
+        run_dates = set(r['run_date'] for r in rows)
+        latest = max(run_dates) if run_dates else "unknown"
+        lines.append(f"=== SMART MONEY LEARNINGS ({latest}) ===\n")
+
+        # Group by category
+        cats = {}
+        for r in rows:
+            cats.setdefault(r['category'], []).append(r)
+
+        # Risk flags first
+        if 'risk_flag' in cats:
+            lines.append("**RISK FLAGS:**")
+            for r in cats['risk_flag']:
+                tag = f"[{r['strength']}]" if r['strength'] else ""
+                lines.append(f"- {r['ticker'] or 'PORTFOLIO'} {tag}: {r['detail']}")
+            lines.append("")
+
+        # Portfolio signals
+        if 'portfolio_signal' in cats:
+            lines.append("**PORTFOLIO SIGNALS (your holdings):**")
+            for r in cats['portfolio_signal']:
+                tag = f"[{r['strength']} {r['direction']}]" if r['strength'] else ""
+                lines.append(f"- {r['ticker']} {tag}: {r['detail']}")
+            lines.append("")
+
+        # Changes detected
+        if 'change_detected' in cats:
+            lines.append("**CHANGES SINCE LAST RUN:**")
+            for r in cats['change_detected']:
+                lines.append(f"- {r['ticker'] or 'MARKET'}: {r['detail']}")
+            lines.append("")
+
+        # New candidates
+        if 'new_candidate' in cats:
+            lines.append("**NEW CANDIDATES (strong signals, not in portfolio):**")
+            for r in cats['new_candidate']:
+                tag = f"[{r['strength']}]" if r['strength'] else ""
+                lines.append(f"- {r['ticker']} {tag}: {r['detail']}")
+            lines.append("")
+
+        # Missed opportunities
+        if 'missed_opportunity' in cats:
+            lines.append("**MISSED OPPORTUNITIES (hindsight):**")
+            for r in cats['missed_opportunity']:
+                lines.append(f"- {r['ticker']}: {r['detail']}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def get_learning_history(self, days=90):
+        """Get learnings over time for trend analysis."""
+        cutoff = (datetime.now() - __import__('datetime').timedelta(days=days)).strftime('%Y-%m-%d')
+        return self.conn.execute("""
+            SELECT * FROM learnings WHERE run_date >= ?
+            ORDER BY run_date DESC, created_at DESC
+        """, (cutoff,)).fetchall()
 
     # ------------------------------------------------------------------
     # Improvements

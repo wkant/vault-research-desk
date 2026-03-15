@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-learn_from_pros.py — Multi-source learning tool
+learn_from_pros.py — Real smart money learning engine
 
-Fetches data from ALL available pro sources, analyzes patterns,
-extracts rules, and patches system files with improvements.
+Fetches data from 5 professional sources, cross-references against
+YOUR portfolio, detects changes, and saves actionable learnings to vault.db.
 
 Sources:
   1. SEC 13F filings (16 hedge funds — quarterly)
@@ -12,13 +12,19 @@ Sources:
   4. Analyst recommendations (Finnhub — monthly)
   5. Insider transactions (Finnhub — daily)
 
-Run once → learn → patch system → done.
+What it actually does:
+  - Cross-references all signals against your holdings and watchlist
+  - Detects ARK accumulation/distribution patterns
+  - Detects guru buys/sells/additions
+  - Detects cluster insider buying (strongest public signal)
+  - Finds new candidates with multi-source support
+  - Saves everything to vault.db learnings table for report consumption
 
 Usage:
-    python3 tools/learn_from_pros.py              # fetch ALL sources, analyze, apply
-    python3 tools/learn_from_pros.py --analyze    # analyze cached data only
-    python3 tools/learn_from_pros.py --apply      # apply improvements only
-    python3 tools/learn_from_pros.py --cleanup    # clear DB tables
+    python3 tools/learn_from_pros.py              # fetch + analyze + save learnings
+    python3 tools/learn_from_pros.py --analyze    # analyze cached data only (no fetch)
+    python3 tools/learn_from_pros.py --summary    # show latest learnings
+    python3 tools/learn_from_pros.py --cleanup    # clear learnings from DB
 """
 
 import json
@@ -234,6 +240,408 @@ def analyze_fund(name: str, holdings: list, filing_date: str = "") -> dict:
     }
 
 
+def quarter_from_date(filing_date: str) -> str:
+    """Derive quarter string from filing date (e.g. '2026-02-17' -> 'Q4-2025')."""
+    if not filing_date:
+        return "Q4-2025"
+    try:
+        d = datetime.strptime(filing_date, "%Y-%m-%d")
+        # 13F filings are for the PREVIOUS quarter
+        # Filed in Feb = Q4 of previous year, May = Q1, Aug = Q2, Nov = Q3
+        month = d.month
+        year = d.year
+        if month <= 4:     # Filed Jan-Apr = Q4 of prior year
+            return f"Q4-{year - 1}"
+        elif month <= 7:   # Filed May-Jul = Q1 of current year
+            return f"Q1-{year}"
+        elif month <= 10:  # Filed Aug-Oct = Q2 of current year
+            return f"Q2-{year}"
+        else:              # Filed Nov-Dec = Q3 of current year
+            return f"Q3-{year}"
+    except ValueError:
+        return "Q4-2025"
+
+
+# ── REAL LEARNING ENGINE ────────────────────────────────────────────
+# Replaces fake static improvements with portfolio-specific, data-driven insights
+# that change every run based on what smart money is actually doing.
+
+
+from db import TICKER_COMPANY, COMPANY_TICKER
+
+
+def _ticker_from_name(company_name: str) -> str:
+    """Try to resolve a company name to a ticker symbol."""
+    name_upper = (company_name or "").upper().strip()
+    if name_upper in COMPANY_TICKER:
+        return COMPANY_TICKER[name_upper]
+    # Fuzzy match: check if company name starts with any known name
+    for known_name, ticker in COMPANY_TICKER.items():
+        if name_upper.startswith(known_name.split()[0]) and len(known_name.split()[0]) > 3:
+            return ticker
+    return ""
+
+
+def cross_reference_portfolio(db) -> list:
+    """Cross-reference ALL smart money signals against portfolio holdings.
+    Returns list of learning dicts ready to save."""
+
+    learnings = []
+    today = datetime.now().strftime("%Y-%m-%d")
+    holdings = db.get_holdings()
+    portfolio_tickers = {h["ticker"] for h in holdings}
+
+    # Also get active watchlist
+    watchlist = db.get_active_watchlist()
+    watchlist_tickers = {w["ticker"] for w in watchlist}
+
+    # Gather all tickers we care about
+    all_tickers = portfolio_tickers | watchlist_tickers
+
+    for ticker in sorted(all_tickers):
+        signals = []
+        signal_data = {}
+        bullish_count = 0
+        bearish_count = 0
+
+        relevance = "HOLDING" if ticker in portfolio_tickers else "WATCHLIST"
+
+        # 1. Institutional 13F consensus
+        holders = db.ticker_held_by(ticker)
+        if holders:
+            fund_names = [h["fund"] for h in holders]
+            avg_pct = sum(h["pct_portfolio"] or 0 for h in holders) / len(holders)
+            signals.append(f"Held by {len(holders)} institutional funds ({', '.join(fund_names[:3])}{'...' if len(fund_names) > 3 else ''})")
+            signal_data["13f_funds"] = fund_names
+            signal_data["13f_avg_pct"] = round(avg_pct, 2)
+            if len(holders) >= 3:
+                bullish_count += 2
+            elif len(holders) >= 1:
+                bullish_count += 1
+
+        # 2. ARK conviction
+        ark = db.get_ark_conviction(ticker)
+        if ark and (ark["buy_count"] or ark["sell_count"]):
+            if ark["buy_count"] >= 3:
+                signals.append(f"ARK accumulating: {ark['buy_count']} buys ({ark['buy_shares']:,} shares)")
+                bullish_count += 2
+            elif ark["buy_count"] > ark["sell_count"]:
+                signals.append(f"ARK net buying: {ark['buy_count']} buys vs {ark['sell_count']} sells")
+                bullish_count += 1
+            elif ark["sell_count"] > ark["buy_count"]:
+                signals.append(f"ARK distributing: {ark['sell_count']} sells vs {ark['buy_count']} buys")
+                bearish_count += 1
+            signal_data["ark"] = ark
+
+        # 3. Guru holdings
+        guru_holdings = db.get_guru_holdings(ticker=ticker)
+        if guru_holdings:
+            guru_names = list(set(h["guru_name"] for h in guru_holdings))
+            activities = [h["activity"] for h in guru_holdings if h["activity"]]
+            signals.append(f"Held by {len(guru_names)} gurus ({', '.join(guru_names[:3])})")
+            signal_data["gurus"] = guru_names
+            # Check if any are adding
+            adding = [a for a in activities if a and ("Buy" in a or "Add" in a)]
+            reducing = [a for a in activities if a and ("Sell" in a or "Reduce" in a)]
+            if adding:
+                bullish_count += 1
+            if reducing:
+                bearish_count += 1
+            else:
+                bullish_count += 1  # holding = mild bullish
+
+        # 4. Insider activity
+        insider_buys = db.get_insider_buys(ticker, days=90)
+        insider_sells_raw = db.conn.execute("""
+            SELECT * FROM insider_txns
+            WHERE ticker=? AND txn_type='SELL'
+              AND txn_date >= date('now', '-90 days')
+        """, (ticker,)).fetchall()
+
+        if insider_buys:
+            buy_value = sum(b["value"] or 0 for b in insider_buys)
+            buy_names = list(set(b["insider_name"] or "unknown" for b in insider_buys))
+            signals.append(f"{len(insider_buys)} insider buys (${buy_value:,.0f} by {', '.join(buy_names[:2])})")
+            signal_data["insider_buys"] = len(insider_buys)
+            signal_data["insider_buy_value"] = buy_value
+            bullish_count += 2  # insider buying is a strong signal
+
+        if len(insider_sells_raw) > 20:
+            sell_names = list(set(s["insider_name"] or "unknown" for s in insider_sells_raw))
+            if len(sell_names) >= 3:
+                # Mega-cap tech insiders sell routinely (10b5-1 plans, tax, diversification)
+                # Only flag as bearish if NOT strongly supported by institutions
+                is_mega_cap = len(holders) >= 5 if holders else False
+                if is_mega_cap:
+                    signals.append(f"Insider selling: {len(insider_sells_raw)} sales by {len(sell_names)} insiders (likely routine — mega-cap with {len(holders)} fund holders)")
+                    signal_data["insider_routine_sell"] = True
+                    # Don't count as bearish for mega-caps with strong institutional support
+                else:
+                    signals.append(f"Heavy insider selling: {len(insider_sells_raw)} sales by {len(sell_names)} insiders — cluster warning")
+                    bearish_count += 2
+                    signal_data["insider_cluster_sell"] = True
+            else:
+                signals.append(f"Insider selling: {len(insider_sells_raw)} transactions (likely routine)")
+                signal_data["insider_routine_sell"] = True
+
+        # Skip tickers with no signals
+        if not signals:
+            continue
+
+        # Determine direction and strength
+        net = bullish_count - bearish_count
+        if net >= 3:
+            direction, strength = "BULLISH", "STRONG"
+        elif net >= 1:
+            direction, strength = "BULLISH", "MODERATE"
+        elif net <= -2:
+            direction, strength = "BEARISH", "STRONG"
+        elif net < 0:
+            direction, strength = "BEARISH", "MODERATE"
+        else:
+            direction, strength = "MIXED", "MODERATE"
+
+        detail = "; ".join(signals)
+        learnings.append({
+            "run_date": today,
+            "category": "portfolio_signal",
+            "ticker": ticker,
+            "signal_type": "cross_source",
+            "direction": direction,
+            "strength": strength,
+            "detail": detail,
+            "data": signal_data,
+            "relevance": relevance,
+        })
+
+        # Risk flag: bearish signals on a holding
+        if relevance == "HOLDING" and direction == "BEARISH":
+            learnings.append({
+                "run_date": today,
+                "category": "risk_flag",
+                "ticker": ticker,
+                "signal_type": "cross_source",
+                "direction": "BEARISH",
+                "strength": strength,
+                "detail": f"WARNING: {ticker} shows bearish smart money signals while you hold it. {detail}",
+                "data": signal_data,
+                "relevance": "HOLDING",
+            })
+
+    return learnings
+
+
+def find_new_candidates(db) -> list:
+    """Find tickers with strong smart money support that aren't in portfolio or watchlist."""
+    learnings = []
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    holdings = db.get_holdings()
+    watchlist = db.get_active_watchlist()
+    owned = {h["ticker"] for h in holdings} | {w["ticker"] for w in watchlist}
+
+    # Get consensus picks held by 3+ funds
+    consensus = db.get_consensus(min_funds=3)
+    for row in consensus:
+        company_name = row["company_name"] or row["ticker"]
+        ticker = _ticker_from_name(company_name) or row["ticker"]
+        if ticker in owned or not ticker.isalpha():
+            continue
+
+        fund_count = row["fund_count"]
+        funds = row["funds"] or ""
+        avg_pct = row["avg_pct"] or 0
+
+        # Check if ARK is also buying
+        ark = db.get_ark_conviction(ticker)
+        ark_signal = ""
+        if ark and ark["buy_count"] >= 3:
+            ark_signal = f", ARK accumulating ({ark['buy_count']} buys)"
+
+        # Check guru consensus
+        guru_holds = db.get_guru_holdings(ticker=ticker)
+        guru_signal = ""
+        if guru_holds:
+            guru_names = list(set(h["guru_name"] for h in guru_holds))
+            guru_signal = f", {len(guru_names)} gurus hold"
+
+        # Insider buying?
+        insider = db.get_insider_buys(ticker, days=90)
+        insider_signal = ""
+        if insider:
+            insider_signal = f", {len(insider)} insider buys"
+
+        signal_count = (1 if fund_count >= 3 else 0) + \
+                       (1 if ark and ark["buy_count"] >= 3 else 0) + \
+                       (1 if guru_holds else 0) + \
+                       (1 if insider else 0)
+
+        if signal_count < 2:
+            continue  # Need at least 2 sources agreeing
+
+        strength = "STRONG" if signal_count >= 3 else "MODERATE"
+
+        detail = (f"{fund_count} institutional funds (avg {avg_pct:.1f}%)"
+                  f"{ark_signal}{guru_signal}{insider_signal}")
+
+        learnings.append({
+            "run_date": today,
+            "category": "new_candidate",
+            "ticker": ticker,
+            "signal_type": "cross_source",
+            "direction": "BULLISH",
+            "strength": strength,
+            "detail": detail,
+            "data": {"fund_count": fund_count, "funds": funds,
+                     "signal_count": signal_count},
+            "relevance": "NEW_CANDIDATE",
+        })
+
+    return learnings[:10]  # Top 10 candidates
+
+
+def detect_ark_patterns(db) -> list:
+    """Detect ARK accumulation/distribution patterns."""
+    learnings = []
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    trades = db.get_ark_trades(days=30)
+    if not trades:
+        return []
+
+    # Group by ticker
+    by_ticker = defaultdict(list)
+    for t in trades:
+        by_ticker[t["ticker"]].append(t)
+
+    for ticker, ticker_trades in by_ticker.items():
+        buys = [t for t in ticker_trades if t["direction"] == "Buy"]
+        sells = [t for t in ticker_trades if t["direction"] == "Sell"]
+
+        # Strong accumulation: 5+ buys
+        if len(buys) >= 5:
+            funds = list(set(t["fund"] for t in buys))
+            learnings.append({
+                "run_date": today,
+                "category": "change_detected",
+                "ticker": ticker,
+                "signal_type": "ark",
+                "direction": "BULLISH",
+                "strength": "STRONG" if len(buys) >= 8 else "MODERATE",
+                "detail": f"ARK heavy accumulation: {len(buys)} buys across {', '.join(funds)} in 30 days",
+                "data": {"buy_count": len(buys), "sell_count": len(sells), "funds": funds},
+                "relevance": "NEW_CANDIDATE",
+            })
+        # Strong distribution: 5+ sells
+        elif len(sells) >= 5:
+            funds = list(set(t["fund"] for t in sells))
+            learnings.append({
+                "run_date": today,
+                "category": "change_detected",
+                "ticker": ticker,
+                "signal_type": "ark",
+                "direction": "BEARISH",
+                "strength": "STRONG" if len(sells) >= 8 else "MODERATE",
+                "detail": f"ARK distributing: {len(sells)} sells across {', '.join(funds)} in 30 days",
+                "data": {"buy_count": len(buys), "sell_count": len(sells), "funds": funds},
+                "relevance": "NEW_CANDIDATE",
+            })
+
+    return learnings
+
+
+def detect_guru_activity(db) -> list:
+    """Detect guru buys/sells from activity field."""
+    learnings = []
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    all_gurus = db.get_guru_holdings()
+    for h in all_gurus:
+        activity = h["activity"] or ""
+        if not activity:
+            continue
+
+        ticker = h["ticker"]
+        guru = h["guru_name"]
+        pct = h["pct_portfolio"] or 0
+
+        if "Buy" in activity or "New" in activity:
+            learnings.append({
+                "run_date": today,
+                "category": "change_detected",
+                "ticker": ticker,
+                "signal_type": "guru",
+                "direction": "BULLISH",
+                "strength": "STRONG" if pct >= 5 else "MODERATE",
+                "detail": f"{guru} — {activity} (now {pct:.1f}% of portfolio)",
+                "data": {"guru": guru, "activity": activity, "pct": pct},
+                "relevance": "NEW_CANDIDATE",
+            })
+        elif "Reduce" in activity or "Sell" in activity:
+            learnings.append({
+                "run_date": today,
+                "category": "change_detected",
+                "ticker": ticker,
+                "signal_type": "guru",
+                "direction": "BEARISH",
+                "strength": "MODERATE",
+                "detail": f"{guru} — {activity} (now {pct:.1f}% of portfolio)",
+                "data": {"guru": guru, "activity": activity, "pct": pct},
+                "relevance": "NEW_CANDIDATE",
+            })
+
+    return learnings
+
+
+def detect_insider_clusters(db) -> list:
+    """Detect cluster insider buying (strongest signal)."""
+    learnings = []
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    clusters = db.get_cluster_buys(days=90, min_insiders=2)
+    for c in clusters:
+        ticker = c["ticker"]
+        num = c["num_insiders"]
+        value = c["total_value"] or 0
+        learnings.append({
+            "run_date": today,
+            "category": "change_detected",
+            "ticker": ticker,
+            "signal_type": "insider",
+            "direction": "BULLISH",
+            "strength": "STRONG",
+            "detail": f"Cluster insider buying: {num} insiders bought ${value:,.0f} in 90 days ({c['first_buy']} to {c['last_buy']})",
+            "data": {"num_insiders": num, "total_value": value},
+            "relevance": "NEW_CANDIDATE",
+        })
+
+    return learnings
+
+
+def save_learnings(db, all_learnings: list) -> int:
+    """Save all learnings to DB, clearing previous unconsumed ones."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    db.clear_learnings(run_date=today)
+
+    saved = 0
+    for l in all_learnings:
+        db.add_learning(
+            run_date=l["run_date"],
+            category=l["category"],
+            detail=l["detail"],
+            ticker=l.get("ticker"),
+            signal_type=l.get("signal_type"),
+            direction=l.get("direction"),
+            strength=l.get("strength"),
+            data=l.get("data"),
+            relevance=l.get("relevance"),
+        )
+        saved += 1
+
+    return saved
+
+
+# Keep extract_patterns for Step 1 display (but it no longer generates improvements)
 def extract_patterns(analyses: list, extra_data: dict = None) -> dict:
     """Extract common patterns across ALL data sources (not just 13F)."""
     extra = extra_data or {}
@@ -301,852 +709,371 @@ def extract_patterns(analyses: list, extra_data: dict = None) -> dict:
     return result
 
 
-# ── Improvement Generation ──────────────────────────────────────────
-
-def generate_improvements(patterns: dict) -> list:
-    """Generate improvement recommendations based on patterns + academic research."""
-    improvements = []
-
-    # 1. Portfolio-level drawdown protection
-    improvements.append({
-        "area": "portfolio_risk",
-        "finding": (
-            "Funds with stop-loss clauses consistently outperform. "
-            "Top hedge fund trait: avoid catastrophic losses over making spectacular gains. "
-            "Think in probabilities, not predictions."
-        ),
-        "recommendation": (
-            "Add portfolio-level drawdown circuit breaker: if portfolio drops 15% from peak, "
-            "shift to defensive (raise cash to 30%+, tighten all stops). "
-            "Currently only position-level stops exist."
-        ),
-        "applies_to": "system/05_position_mgmt.md",
-    })
-
-    # 2. Position count targets
-    avg_pos = patterns.get("avg_positions", 0)
-    improvements.append({
-        "area": "diversification",
-        "finding": (
-            f"Funds average {avg_pos} positions. "
-            "Academic consensus (CFA Institute, Statman 1987): 20-30 stocks achieve peak "
-            "diversification. Beyond 30, volatility drops <3% while returns dilute."
-        ),
-        "recommendation": (
-            "Add position count targets by portfolio size. "
-            "Under $25K: 5-12 positions (ETF-heavy). $25K+: 12-25 positions."
-        ),
-        "applies_to": "system/05_position_mgmt.md",
-    })
-
-    # 3. Conviction-weighted sizing (Buffett-inspired)
-    improvements.append({
-        "area": "position_sizing",
-        "finding": (
-            "Buffett: top 5 = 70% of $267B portfolio. 20-quarter avg holding period. "
-            "'Diversification makes little sense for anyone who knows what they're doing.' "
-            "Concentrated managers outperform when thesis is strong."
-        ),
-        "recommendation": (
-            "For HIGH conviction (***) picks, allow up to 18% allocation (current max: 15%). "
-            "Only for *** picks with clear, validated thesis that passed Devil's Gate."
-        ),
-        "applies_to": "system/05_position_mgmt.md",
-    })
-
-    # 4. Smart money validation
-    consensus = patterns.get("consensus_holdings", [])
-    if consensus:
-        names = ", ".join(f"{n} ({c} funds)" for n, c in consensus[:5])
-        improvements.append({
-            "area": "strategy_validation",
-            "finding": f"Current consensus holdings across top funds: {names}",
-            "recommendation": (
-                "Add 'smart money alignment' as thesis validator in Strategy phase. "
-                "3+ top funds holding the same name is a positive signal (not sufficient alone)."
-            ),
-            "applies_to": "system/02_strategy.md",
-        })
-
-    # 5. Insider buying signal
-    improvements.append({
-        "area": "screener_signal",
-        "finding": (
-            "Harvard Business School (2022): insider buying outperforms market by 4-8% annually. "
-            "Academic return: 50+ bps/month abnormal return. "
-            "Strongest when opportunistic (non-routine CEO/CFO open-market purchases)."
-        ),
-        "recommendation": (
-            "Add insider buying as a screener signal. "
-            "CEO/CFO open-market purchases in last 90 days = strong bullish signal."
-        ),
-        "applies_to": "tools/screener.py",
-    })
-
-    # 6. Holding period / turnover check
-    improvements.append({
-        "area": "holding_period",
-        "finding": (
-            "Optimal holding period per academic literature: ~4 years (25% annual turnover). "
-            "Institutional average: 1.7 years (58% turnover) — suboptimal. "
-            "Over-trading destroys returns through fees and tax drag."
-        ),
-        "recommendation": (
-            "Add turnover check to self-analyze: if portfolio turnover exceeds 50%/year, "
-            "flag as over-trading. Satellite positions exempt."
-        ),
-        "applies_to": "tools/self_analyze.py",
-    })
-
-    # 7. Kelly Criterion awareness
-    improvements.append({
-        "area": "position_sizing_method",
-        "finding": (
-            "Renaissance uses Kelly Criterion for position sizing: "
-            "bet_size = (win_prob * avg_win - loss_prob * avg_loss) / avg_win. "
-            "Optimizes growth while preventing ruin."
-        ),
-        "recommendation": (
-            "After 20+ trades in vault.db, calculate win rate and avg win/loss "
-            "by conviction level. Use simplified Kelly to validate position sizes."
-        ),
-        "applies_to": "system/05_position_mgmt.md",
-    })
-
-    # 8. Business cycle sector mapping
-    improvements.append({
-        "area": "sector_strategy",
-        "finding": (
-            "Best-performing funds use sector rotation aligned with business cycle. "
-            "Healthcare-focused equity funds +33.8% in strong years. "
-            "Sector timing matters more than stock picking in some cycles."
-        ),
-        "recommendation": (
-            "In Research phase, explicitly map current business cycle stage and identify "
-            "which sectors historically outperform in that stage."
-        ),
-        "applies_to": "system/01_research.md",
-    })
-
-    # 9. Devil's Gate smart money challenge
-    improvements.append({
-        "area": "adversarial_validation",
-        "finding": (
-            "Institutional 13F consensus + insider buying are the two strongest "
-            "public signals of informed opinion."
-        ),
-        "recommendation": (
-            "Add 'Does smart money agree?' to Devil's Gate challenges. "
-            "If both institutions AND insiders are selling → automatic FLAG."
-        ),
-        "applies_to": "system/03_devils_gate.md",
-    })
-
-    # ── Data-driven improvements from live sources ──────────────
-
-    # 10. ARK trading patterns
-    ark = patterns.get("ark", {})
-    if ark:
-        top_buys = ark.get("top_buys", [])
-        top_sells = ark.get("top_sells", [])
-        if top_buys:
-            buy_str = ", ".join(f"{t}({c}x)" for t, c in top_buys[:5])
-            improvements.append({
-                "area": "ark_signals",
-                "finding": (
-                    f"ARK Invest (30-day): {ark['total_trades']} trades, "
-                    f"{ark['buys']} buys / {ark['sells']} sells = {ark['net_direction']}. "
-                    f"Top accumulation: {buy_str}."
-                ),
-                "recommendation": (
-                    "ARK conviction buys (3+ purchases of same ticker in 30 days) are a growth signal. "
-                    "Cross-reference with portfolio candidates. ARK sells = they're giving up on thesis."
-                ),
-                "applies_to": "system/02_strategy.md",
-            })
-
-    # 11. Analyst consensus for portfolio holdings
-    analyst = patterns.get("analyst", {})
-    if analyst:
-        bullish = [t for t, d in analyst.items() if d.get("signal") == "BULLISH"]
-        bearish = [t for t, d in analyst.items() if d.get("signal") == "BEARISH"]
-        mixed = [t for t, d in analyst.items() if d.get("signal") == "MIXED"]
-        if bullish or bearish:
-            improvements.append({
-                "area": "analyst_consensus",
-                "finding": (
-                    f"Wall Street analyst consensus: "
-                    f"{len(bullish)} BULLISH ({', '.join(bullish[:5])})"
-                    + (f", {len(bearish)} BEARISH ({', '.join(bearish)})" if bearish else "")
-                    + (f", {len(mixed)} MIXED ({', '.join(mixed)})" if mixed else "")
-                    + "."
-                ),
-                "recommendation": (
-                    "Analyst consensus is a thesis validator (not generator). "
-                    "If analysts are BEARISH on a BUY candidate → FLAG in Devil's Gate. "
-                    "Unanimous BULLISH = crowded trade risk."
-                ),
-                "applies_to": "system/03_devils_gate.md",
-            })
-
-    # 12. Insider activity patterns
-    insider = patterns.get("insider", {})
-    if insider:
-        net_buys = [t for t, d in insider.items() if d.get("net") == "NET BUY"]
-        heavy_sells = [t for t, d in insider.items() if d.get("sells", 0) > 20]
-        if net_buys:
-            improvements.append({
-                "area": "insider_buying_signal",
-                "finding": (
-                    f"Insider net buying detected: {', '.join(net_buys)}. "
-                    "Insider buying outperforms by 4-8% annually (Harvard 2022)."
-                ),
-                "recommendation": (
-                    f"Insider buying in {', '.join(net_buys)} = strong bullish signal. "
-                    "Consider as thesis support in Strategy phase."
-                ),
-                "applies_to": "system/02_strategy.md",
-            })
-        if heavy_sells:
-            sell_details = ", ".join(
-                f"{t}({insider[t]['sells']} sells)" for t in heavy_sells
-            )
-            improvements.append({
-                "area": "insider_selling_alert",
-                "finding": (
-                    f"Heavy insider selling (>20 transactions/90 days): {sell_details}. "
-                    "Note: most insider selling is routine (exec comp, 10b5-1 plans). "
-                    "Cluster selling by multiple C-suite = genuine warning."
-                ),
-                "recommendation": (
-                    "Flag heavy insider selling in Devil's Gate. If selling is routine "
-                    "(single exec, regular schedule) → ignore. If cluster (3+ insiders) → RED FLAG."
-                ),
-                "applies_to": "system/03_devils_gate.md",
-            })
-
-    # 13. Guru consensus for portfolio holdings
-    # Check if portfolio tickers are held by multiple gurus
-    guru_data = patterns.get("gurus", {})
-    if guru_data:
-        with VaultDB() as db:
-            guru_consensus = db.get_guru_consensus(min_gurus=2)
-        if guru_consensus:
-            top_consensus = [(r['ticker'], r['guru_count']) for r in guru_consensus[:10]]
-            consensus_str = ", ".join(f"{t}({c} gurus)" for t, c in top_consensus)
-            improvements.append({
-                "area": "guru_consensus",
-                "finding": (
-                    f"Superinvestor consensus (held by 2+ gurus): {consensus_str}."
-                ),
-                "recommendation": (
-                    "Guru consensus is a strong thesis validator. "
-                    "If Buffett + Ackman + Klarman all hold it → high confidence. "
-                    "Use as tiebreaker between similar candidates."
-                ),
-                "applies_to": "system/02_strategy.md",
-            })
-
-    return improvements
-
-
-# ── System File Patching ────────────────────────────────────────────
-
-def apply_improvements(improvements: list) -> list:
-    """Apply improvements to system files using marker-based idempotent patches."""
-    applied = []
-
-    # ── 1. Position Management: portfolio-level risk + sizing ────────
-    pos_mgmt = ROOT / "system" / "05_position_mgmt.md"
-    if pos_mgmt.exists():
-        content = pos_mgmt.read_text()
-
-        marker = "<!-- PRO-INSIGHT: PORTFOLIO-LEVEL RISK -->"
-        if marker not in content:
-            patch = f"""
-
-{marker}
-## Portfolio-Level Risk Controls (learned from pro analysis)
-
-### Drawdown Circuit Breaker
-If portfolio drops **15% from peak value**:
-1. Raise cash to 30%+ (trim weakest positions first)
-2. Tighten all trailing stops by one tier
-3. No new BUY recommendations until drawdown recovers to -10%
-4. Type `flash` for emergency assessment
-
-*Source: Funds with stop-loss clauses consistently outperform. Portfolio-level limits prevent catastrophic losses.*
-
-### Turnover Check
-If portfolio turns over >50% annually (excluding stopped-out positions):
-- Flag as potential over-trading in self-analyze
-- Review if short holding periods are driven by panic or plan
-- Optimal turnover per academic research: ~25%/year
-
-*Source: Institutional average 58% turnover is suboptimal. Literature suggests 25% (4-year hold) maximizes after-fee returns.*
-
-### Position Count Targets
-| Portfolio Size | Target Positions | Approach |
-|---------------|-----------------|----------|
-| Under $10K | 5-8 | ETF-heavy for diversification |
-| $10K-$25K | 8-12 | Mix of ETFs and individual stocks |
-| $25K-$100K | 12-20 | Full diversification, manageable |
-| $100K+ | 15-25 | Academic optimal range |
-
-*Source: CFA Institute — beyond 30 positions, volatility reduction is <3% while return dilution increases.*
-
-### Conviction-Weighted Sizing (Buffett-Inspired)
-Top funds concentrate in highest-conviction ideas. Buffett: top 5 = 70% of portfolio.
-Retail adaptation:
-| Conviction | Max Position Size | Notes |
-|-----------|------------------|-------|
-| `***` HIGH | 18% | Core positions with strongest thesis |
-| `**` MEDIUM | 12% | Standard positions |
-| `*` LOW | 7% | Speculative/satellite only |
-
-*Source: Berkshire top 5 holdings = 70% of $267B portfolio. Concentration works when thesis is validated.*
-
-### Simplified Kelly Criterion (after 20+ trades)
-Once vault.db has 20+ closed trades, calculate:
-```
-kelly_pct = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win
-```
-Use half-Kelly (kelly_pct / 2) as a sanity check on position sizing.
-If your actual position sizes consistently exceed Kelly, you're over-betting.
-
-*Source: Renaissance Technologies uses Kelly Criterion for optimal position sizing.*
-"""
-            if "## Emergency Rules" in content:
-                content = content.replace("## Emergency Rules", patch + "\n## Emergency Rules")
-            else:
-                content += patch
-            pos_mgmt.write_text(content)
-            applied.append("system/05_position_mgmt.md — portfolio-level risk controls, position count targets, conviction sizing, Kelly Criterion")
-
-    # ── 2. Strategy: smart money validation ─────────────────────────
-    strategy = ROOT / "system" / "02_strategy.md"
-    if strategy.exists():
-        content = strategy.read_text()
-
-        marker = "<!-- PRO-INSIGHT: SMART MONEY VALIDATION -->"
-        if marker not in content:
-            patch = f"""
-
-{marker}
-**SMART MONEY VALIDATION (learned from pro analysis):**
-For every BUY recommendation, consider smart money alignment:
-- If 3+ top institutional funds hold the same name -> positive thesis support (note it)
-- If top funds are actively selling -> red flag (must explain why you disagree)
-- If company insiders are buying their own stock -> strong bullish signal
-- This is a VALIDATOR, not a GENERATOR — never buy just because a fund holds it (13F is 45 days stale)
-
-*Sources: Harvard (2022) — insider buying outperforms by 4-8% annually. 13F consensus provides thesis validation.*
-"""
-            if "## Rules" in content:
-                content = content.replace("## Rules", patch + "\n## Rules")
-            else:
-                content += patch
-            strategy.write_text(content)
-            applied.append("system/02_strategy.md — smart money validation step")
-
-    # ── 3. Research: business cycle mapping ─────────────────────────
-    research = ROOT / "system" / "01_research.md"
-    if research.exists():
-        content = research.read_text()
-
-        marker = "<!-- PRO-INSIGHT: BUSINESS CYCLE MAPPING -->"
-        if marker not in content:
-            patch = f"""
-
-{marker}
-**BUSINESS CYCLE SECTOR MAPPING (learned from pro analysis):**
-In Market Regime section, identify current business cycle stage:
-| Cycle Stage | Characteristics | Historically Strong Sectors |
-|------------|----------------|---------------------------|
-| Early expansion | Recovery, low rates, rising confidence | Financials, Consumer Discretionary, Industrials |
-| Mid expansion | Steady growth, rising earnings | Technology, Industrials, Materials |
-| Late expansion | Peak growth, rising inflation | Energy, Materials, Healthcare |
-| Contraction | Falling growth, defensive rotation | Utilities, Consumer Staples, Healthcare |
-
-Map current stage -> sector recommendations should align with historical patterns.
-*Source: Top-performing funds use sector rotation aligned with business cycle.*
-"""
-            if "## Rules" in content:
-                content = content.replace("## Rules", patch + "\n## Rules")
-            else:
-                content += patch
-            research.write_text(content)
-            applied.append("system/01_research.md — business cycle sector mapping")
-
-    # ── 4. Devil's Gate: smart money challenge ──────────────────────
-    devils_gate = ROOT / "system" / "03_devils_gate.md"
-    if devils_gate.exists():
-        content = devils_gate.read_text()
-
-        marker = "<!-- PRO-INSIGHT: SMART MONEY CHALLENGE -->"
-        if marker not in content:
-            patch = f"""
-
-{marker}
-**SMART MONEY CHALLENGE (learned from pro analysis):**
-For every BUY recommendation, Devil's Gate should consider:
-- "Are top institutional investors buying or selling this name?"
-- "Are company insiders buying or selling their own stock?"
-- If both institutions AND insiders are selling -> FLAG
-- If insiders are buying while stock is down -> contrarian bullish signal, reduce FLAG severity
-
-*Source: Institutional 13F consensus + insider buying are the two strongest public signals of informed opinion.*
-"""
-            content += patch
-            devils_gate.write_text(content)
-            applied.append("system/03_devils_gate.md — smart money challenge question")
-
-    # ── 5. 00_system.md: update Hard Limits for conviction sizing ───
-    system_md = ROOT / "system" / "00_system.md"
-    if system_md.exists():
-        content = system_md.read_text()
-
-        marker = "<!-- PRO-INSIGHT: CONVICTION SIZING -->"
-        if marker not in content:
-            patch = f"""{marker}
-**Conviction-weighted exception (learned from pro analysis):**
-- `***` HIGH conviction picks may go up to 18% (override 15% limit) IF thesis passed all Devil's Gate tests
-- This is the Buffett rule: concentrate when conviction is highest
-"""
-            if "No single stock >15% of total portfolio" in content:
-                content = content.replace(
-                    "- No single stock >15% of total portfolio",
-                    "- No single stock >15% of total portfolio (see conviction exception below)\n" + patch
-                )
-                system_md.write_text(content)
-                applied.append("system/00_system.md — conviction-weighted sizing exception")
-
-    return applied
-
-
-# ── Report Generation ───────────────────────────────────────────────
-
-def generate_report(patterns: dict, improvements: list, applied: list) -> str:
-    """Generate the learning report."""
-    now = datetime.now()
-    timestamp = now.strftime("%Y-%m-%d %H:%M")
-
-    lines = [
-        "# Learn From Pros — Analysis Report",
-        f"*Generated: {timestamp}*",
-        "",
-        "## Summary",
-        f"Analyzed **{patterns.get('num_funds', 0)}** institutional funds from SEC 13F filings.",
-        f"Extracted **{len(improvements)}** improvement recommendations.",
-        f"Applied **{len(applied)}** patches to system files.",
-        "",
-    ]
-
-    # Fund-by-fund analysis
-    lines.append("## Fund Analysis")
-    for fund in patterns.get("fund_details", []):
-        lines.append(f"\n### {fund['name']}")
-        lines.append(f"- **Filing date:** {fund.get('filing_date', 'N/A')}")
-        lines.append(f"- **Portfolio value:** ${fund['total_value_millions']:,.1f}M")
-        lines.append(f"- **Positions:** {fund['num_positions']}")
-        lines.append(f"- **Top 5 concentration:** {fund['top5_pct']}%")
-        lines.append(f"- **Top 10 concentration:** {fund['top10_pct']}%")
-        lines.append(f"- **Largest position:** {fund['largest_position']} ({fund['largest_position_pct']}%)")
-        lines.append("- **Top 10 holdings:**")
-        for name, pct in fund["top10"]:
-            lines.append(f"  - {name}: {pct}%")
-
-    # Patterns
-    lines.append("\n## Key Patterns Across Funds")
-    lines.append(f"- **Average positions:** {patterns.get('avg_positions', 'N/A')}")
-    pos_range = patterns.get("position_range", ("N/A", "N/A"))
-    lines.append(f"- **Position range:** {pos_range[0]} to {pos_range[1]}")
-    lines.append(f"- **Avg top-5 concentration:** {patterns.get('avg_top5_concentration', 'N/A')}%")
-    lines.append(f"- **Avg top-10 concentration:** {patterns.get('avg_top10_concentration', 'N/A')}%")
-    lines.append(f"- **Avg largest position:** {patterns.get('avg_largest_position', 'N/A')}%")
-
-    concentrated = patterns.get("concentrated_funds", [])
-    if concentrated:
-        lines.append(f"- **Concentrated funds (top 5 > 50%):** {', '.join(concentrated)}")
-    diversified = patterns.get("diversified_funds", [])
-    if diversified:
-        lines.append(f"- **Highly diversified (500+ positions):** {', '.join(diversified)}")
-
-    consensus = patterns.get("consensus_holdings", [])
-    if consensus:
-        lines.append("\n### Consensus Holdings (held by 2+ funds)")
-        for name, count in consensus:
-            lines.append(f"- **{name}** — held by {count} funds")
-
-    # Improvements
-    lines.append("\n## Improvements Generated")
-    for i, imp in enumerate(improvements, 1):
-        lines.append(f"\n### {i}. {imp['area'].replace('_', ' ').title()}")
-        lines.append(f"**Finding:** {imp['finding']}")
-        lines.append(f"**Action:** {imp['recommendation']}")
-        lines.append(f"**File:** `{imp['applies_to']}`")
-
-    # Applied patches
-    lines.append("\n## System Files Patched")
-    if applied:
-        for a in applied:
-            lines.append(f"- {a}")
-    else:
-        lines.append("- All improvements already applied (idempotent — no duplicate patches)")
-
-    # Academic research sources
-    lines.append("\n## Research Sources")
-    lines.append("- **SEC EDGAR** — quarterly 13F institutional holdings filings")
-    lines.append("- **Statman (1987)** — 20-30 stocks achieve peak diversification")
-    lines.append("- **CFA Institute (2021)** — beyond 30 positions, <3% additional risk reduction")
-    lines.append("- **Harvard Business School (2022)** — insider buying outperforms market by 4-8% annually")
-    lines.append("- **Federal Reserve (2021)** — hedge fund transaction data, 5.4% avg daily turnover")
-    lines.append("- **Kelly Criterion** — optimal position sizing, used by Renaissance Technologies")
-    lines.append("- **Berkshire Hathaway** — top 5 = 70% concentration, 20-quarter avg holding period")
-    lines.append("- **Bridgewater Associates** — 30-40 simultaneous positions, risk parity approach")
-    lines.append("- **Fidelity** — sector rotation aligned with business cycle stages")
-
-    lines.append("\n---")
-    lines.append("*Learnings absorbed into system files. Data stored in vault.db.*")
-
-    return "\n".join(lines)
-
-
-# ── Main ────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Learn from pro investors — one-time improvement tool")
-    parser.add_argument("--analyze", action="store_true", help="Analyze cached data only (skip fetch)")
-    parser.add_argument("--apply", action="store_true", help="Apply improvements only (skip fetch + analyze)")
-    parser.add_argument("--cleanup", action="store_true", help="Clear 13F data from vault.db")
+    parser = argparse.ArgumentParser(description="Learn from pros — real smart money analysis")
+    parser.add_argument("--analyze", action="store_true", help="Analyze cached data only (no fetch)")
+    parser.add_argument("--summary", action="store_true", help="Show latest learnings summary")
+    parser.add_argument("--cleanup", action="store_true", help="Clear learning data from DB")
     args = parser.parse_args()
 
-    # Cleanup mode
+    if args.summary:
+        with VaultDB() as db:
+            print(db.get_learnings_summary())
+        return
+
     if args.cleanup:
-        print("Data lives in vault.db — no separate files to clean.")
-        print("To clear 13F tables, use sqlite3 vault.db directly.")
+        with VaultDB() as db:
+            db.conn.execute("DELETE FROM learnings")
+            db.conn.commit()
+            print("Cleared all learnings from vault.db")
         return
 
     all_analyses = []
-    extra_data = {}  # Collects ARK, analyst, insider, guru data for learning
 
-    if not args.apply:
-        if not args.analyze:
-            # ── STEP 1: Fetch 13F data from SEC EDGAR ───────────────
-            print("=" * 60)
-            print("STEP 1: Fetching 13F data from SEC EDGAR")
-            print("=" * 60)
+    if not args.analyze:
+        # ── STEP 1: Fetch 13F data from SEC EDGAR ───────────────
+        print("=" * 60)
+        print("STEP 1: Fetching 13F data from SEC EDGAR")
+        print("=" * 60)
 
-            for fund_name, cik in FUNDS.items():
-                print(f"\n  {fund_name} (CIK: {cik})")
+        for fund_name, cik in FUNDS.items():
+            print(f"\n  {fund_name} (CIK: {cik})")
 
-                # Check DB cache
-                with VaultDB() as db:
-                    cached = db.reconstruct_fund_analysis(fund_name)
-                if cached:
-                    print("    Using cached data from vault.db")
-                    all_analyses.append(cached)
-                    continue
+            # Check DB cache
+            with VaultDB() as db:
+                cached = db.reconstruct_fund_analysis(fund_name)
+            if cached:
+                print("    Using cached data from vault.db")
+                all_analyses.append(cached)
+                continue
 
-                # Fetch filing list
-                print("    Fetching filing list...")
-                data = fetch_filing_list(cik)
-                if not data:
-                    continue
+            # Fetch filing list
+            print("    Fetching filing list...")
+            data = fetch_filing_list(cik)
+            if not data:
+                continue
 
-                # Find latest 13F
-                accession, filing_date = find_latest_13f(data)
-                if not accession:
-                    print("    Warning: No 13F-HR filing found")
-                    continue
+            # Find latest 13F
+            accession, filing_date = find_latest_13f(data)
+            if not accession:
+                print("    Warning: No 13F-HR filing found")
+                continue
 
-                print(f"    Latest 13F: {filing_date} ({accession})")
+            print(f"    Latest 13F: {filing_date} ({accession})")
+            quarter = quarter_from_date(filing_date)
 
-                # Fetch holdings
-                print("    Fetching holdings...")
-                time.sleep(0.15)  # SEC rate limit: 10 req/sec
-                holdings = fetch_13f_holdings(cik, accession)
+            # Fetch holdings
+            print("    Fetching holdings...")
+            time.sleep(0.15)  # SEC rate limit
+            holdings = fetch_13f_holdings(cik, accession)
 
-                if not holdings:
-                    print("    Warning: No holdings parsed")
-                    continue
+            if not holdings:
+                print("    Warning: No holdings parsed")
+                continue
 
-                print(f"    Found {len(holdings)} positions")
+            print(f"    Found {len(holdings)} positions")
 
-                # Analyze
-                analysis = analyze_fund(fund_name, holdings, filing_date)
-                all_analyses.append(analysis)
+            # Analyze
+            analysis = analyze_fund(fund_name, holdings, filing_date)
+            all_analyses.append(analysis)
 
-                # Persist to DB
-                total_value = sum(h["value"] for h in holdings)
-                with VaultDB() as db:
-                    db.add_fund(
-                        name=fund_name,
-                        quarter="Q4-2025",
-                        portfolio_value=analysis.get("total_value_millions"),
-                        num_positions=analysis.get("num_positions"),
-                        top5_conc=analysis.get("top5_pct"),
-                        top10_conc=analysis.get("top10_pct"),
+            # Persist to DB
+            total_value = sum(h["value"] for h in holdings)
+            with VaultDB() as db:
+                db.add_fund(
+                    name=fund_name,
+                    quarter=quarter,
+                    portfolio_value=analysis.get("total_value_millions"),
+                    num_positions=analysis.get("num_positions"),
+                    top5_conc=analysis.get("top5_pct"),
+                    top10_conc=analysis.get("top10_pct"),
+                    filing_date=filing_date,
+                )
+                for h in holdings:
+                    db.add_institutional(
+                        fund=fund_name,
+                        ticker=h.get("name", ""),
+                        company_name=h.get("name", ""),
+                        shares=h.get("shares"),
+                        value=h.get("value"),
+                        pct_portfolio=round(h["value"] / total_value * 100, 2) if total_value else 0,
+                        quarter=quarter,
                         filing_date=filing_date,
                     )
-                    for h in holdings:
-                        db.add_institutional(
-                            fund=fund_name,
-                            ticker=h.get("name", ""),
-                            company_name=h.get("name", ""),
-                            shares=h.get("shares"),
-                            value=h.get("value"),
-                            pct_portfolio=round(h["value"] / total_value * 100, 2) if total_value else 0,
-                            quarter="Q4-2025",
-                            filing_date=filing_date,
-                        )
 
-                time.sleep(0.15)  # Rate limiting
+            time.sleep(0.15)
 
-            # ── STEP 1b: Fetch ARK daily trades ───────────────────
-            print("\n" + "=" * 60)
-            print("STEP 1b: Fetching ARK Invest daily trades")
-            print("=" * 60)
-            try:
-                from smart_money import fetch_all_ark_trades
-                ark_trades = fetch_all_ark_trades(days=30)
-                if ark_trades:
-                    with VaultDB() as db:
-                        db.cache_ark_trades(ark_trades)
-                    # Analyze ARK patterns
-                    ark_buys = [t for t in ark_trades if t.get("direction") == "Buy"]
-                    ark_sells = [t for t in ark_trades if t.get("direction") == "Sell"]
-                    buy_tickers = Counter(t["ticker"] for t in ark_buys)
-                    sell_tickers = Counter(t["ticker"] for t in ark_sells)
-                    print(f"\n  Total: {len(ark_trades)} trades (30 days)")
-                    print(f"  Buys: {len(ark_buys)} | Sells: {len(ark_sells)}")
-                    if buy_tickers:
-                        top_buys = buy_tickers.most_common(5)
-                        print(f"  Top buys: {', '.join(f'{t}({c})' for t,c in top_buys)}")
-                    if sell_tickers:
-                        top_sells = sell_tickers.most_common(5)
-                        print(f"  Top sells: {', '.join(f'{t}({c})' for t,c in top_sells)}")
-                    extra_data["ark_trades"] = ark_trades
-                else:
-                    print("  No ARK trades fetched")
-            except Exception as e:
-                print(f"  ARK fetch error: {e}")
-
-            # ── STEP 1c: Fetch Guru holdings (Dataroma) ───────────
-            print("\n" + "=" * 60)
-            print("STEP 1c: Fetching superinvestor holdings (Dataroma)")
-            print("=" * 60)
-            try:
-                from smart_money import fetch_guru_holdings, DEFAULT_GURUS
-                guru_data = {}
+        # ── STEP 1b: Fetch ARK daily trades ───────────────────
+        print("\n" + "=" * 60)
+        print("STEP 1b: Fetching ARK Invest daily trades")
+        print("=" * 60)
+        try:
+            from smart_money import fetch_all_ark_trades
+            ark_trades = fetch_all_ark_trades(days=30)
+            if ark_trades:
                 with VaultDB() as db:
-                    for code, name in DEFAULT_GURUS.items():
-                        # Check cache (7-day TTL for quarterly data)
-                        cached = db.get_guru_holdings(guru_code=code)
-                        if cached:
-                            cached_at = datetime.fromisoformat(cached[0]["cached_at"])
-                            age_days = (datetime.now() - cached_at).total_seconds() / 86400
-                            if age_days < 7:
-                                guru_data[name] = len(cached)
-                                print(f"  {name}: {len(cached)} holdings (cached)")
-                                continue
+                    db.cache_ark_trades(ark_trades)
+                ark_buys = [t for t in ark_trades if t.get("direction") == "Buy"]
+                ark_sells = [t for t in ark_trades if t.get("direction") == "Sell"]
+                buy_tickers = Counter(t["ticker"] for t in ark_buys)
+                sell_tickers = Counter(t["ticker"] for t in ark_sells)
+                print(f"\n  Total: {len(ark_trades)} trades (30 days)")
+                print(f"  Buys: {len(ark_buys)} | Sells: {len(ark_sells)}")
+                if buy_tickers:
+                    print(f"  Top buys: {', '.join(f'{t}({c})' for t, c in buy_tickers.most_common(5))}")
+                if sell_tickers:
+                    print(f"  Top sells: {', '.join(f'{t}({c})' for t, c in sell_tickers.most_common(5))}")
+            else:
+                print("  No ARK trades fetched")
+        except Exception as e:
+            print(f"  ARK fetch error: {e}")
 
-                        holdings, guru_name, quarter = fetch_guru_holdings(code)
-                        if holdings:
-                            db.cache_guru_holdings(code, guru_name or name, holdings, quarter)
-                            guru_data[guru_name or name] = len(holdings)
-                            print(f"  {guru_name or name}: {len(holdings)} holdings ({quarter})")
-                        else:
-                            print(f"  {name}: no data")
-                        time.sleep(0.5)  # Be polite to Dataroma
-                extra_data["guru_data"] = guru_data
-                print(f"\n  Total gurus: {len(guru_data)}")
-            except Exception as e:
-                print(f"  Guru fetch error: {e}")
-
-            # ── STEP 1d: Fetch Analyst Recommendations (Finnhub) ──
-            print("\n" + "=" * 60)
-            print("STEP 1d: Fetching analyst recommendations (Finnhub)")
-            print("=" * 60)
-            try:
-                from news import _load_api_keys
-                keys = _load_api_keys()
-                finnhub_key = os.environ.get("FINNHUB_API_KEY") or keys.get("FINNHUB_API_KEY", "")
-                if finnhub_key:
-                    # Get portfolio + common tickers
-                    with VaultDB() as db:
-                        port_holdings = db.get_holdings()
-                    port_tickers = [h["ticker"] for h in port_holdings]
-                    # Add consensus tickers
-                    check_tickers = list(set(port_tickers + ["XOM", "NVDA", "AMZN", "MSFT", "AAPL", "META", "LMT", "XLU"]))
-
-                    from urllib.request import Request as Req, urlopen as uopen
-                    analyst_summary = {}
-                    for ticker in check_tickers:
-                        try:
-                            url = f"https://finnhub.io/api/v1/stock/recommendation?symbol={ticker}&token={finnhub_key}"
-                            req = Req(url, headers={"Accept": "application/json"})
-                            with uopen(req, timeout=10) as resp:
-                                recs = json.loads(resp.read())
-                            if recs:
-                                r = recs[0]
-                                bull = r.get('strongBuy', 0) + r.get('buy', 0)
-                                bear = r.get('sell', 0) + r.get('strongSell', 0)
-                                hold = r.get('hold', 0)
-                                total = bull + bear + hold
-                                signal = 'BULLISH' if bull > bear else 'MIXED' if bull == bear else 'BEARISH'
-                                analyst_summary[ticker] = {
-                                    'strong_buy': r.get('strongBuy', 0),
-                                    'buy': r.get('buy', 0),
-                                    'hold': hold,
-                                    'sell': r.get('sell', 0),
-                                    'strong_sell': r.get('strongSell', 0),
-                                    'signal': signal,
-                                    'period': r.get('period', ''),
-                                }
-                                print(f"  {ticker}: {bull} bullish / {hold} hold / {bear} bearish — {signal}")
-                        except Exception:
-                            pass
-                    extra_data["analyst_summary"] = analyst_summary
-                    print(f"\n  Checked {len(analyst_summary)} tickers")
-                else:
-                    print("  No FINNHUB_API_KEY — skipping")
-            except Exception as e:
-                print(f"  Analyst rec error: {e}")
-
-            # ── STEP 1e: Fetch Insider Transactions (Finnhub) ─────
-            print("\n" + "=" * 60)
-            print("STEP 1e: Fetching insider transactions (Finnhub)")
-            print("=" * 60)
-            try:
-                if finnhub_key:
-                    from urllib.request import Request as Req, urlopen as uopen
-                    insider_summary = {}
-                    for ticker in check_tickers:
-                        try:
-                            from_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
-                            to_date = datetime.now().strftime("%Y-%m-%d")
-                            url = (f"https://finnhub.io/api/v1/stock/insider-transactions"
-                                   f"?symbol={ticker}&from={from_date}&to={to_date}&token={finnhub_key}")
-                            req = Req(url, headers={"Accept": "application/json"})
-                            with uopen(req, timeout=10) as resp:
-                                data = json.loads(resp.read())
-                            txns = data.get("data", [])
-                            if txns:
-                                buys = [t for t in txns if t.get("transactionCode") == "P"]
-                                sells = [t for t in txns if t.get("transactionCode") == "S"]
-                                if buys or sells:
-                                    insider_summary[ticker] = {
-                                        'buys': len(buys),
-                                        'sells': len(sells),
-                                        'net': 'NET BUY' if len(buys) > len(sells) else 'NET SELL',
-                                    }
-                                    print(f"  {ticker}: {len(buys)} buys, {len(sells)} sells — "
-                                          f"{'NET BUY' if len(buys) > len(sells) else 'NET SELL'}")
-                        except Exception:
-                            pass
-                    if insider_summary:
-                        extra_data["insider_summary"] = insider_summary
-                    else:
-                        print("  No significant insider activity found")
-                    print(f"\n  Checked {len(check_tickers)} tickers")
-                else:
-                    print("  No FINNHUB_API_KEY — skipping")
-            except Exception as e:
-                print(f"  Insider fetch error: {e}")
-
-        else:
-            # Load cached analyses from DB
-            print("Loading cached data from vault.db...")
+        # ── STEP 1c: Fetch Guru holdings (Dataroma) ───────────
+        print("\n" + "=" * 60)
+        print("STEP 1c: Fetching superinvestor holdings (Dataroma)")
+        print("=" * 60)
+        try:
+            from smart_money import fetch_guru_holdings, DEFAULT_GURUS
+            guru_count = 0
             with VaultDB() as db:
-                all_analyses = db.get_all_fund_analyses()
-            print(f"  Loaded {len(all_analyses)} fund analyses")
+                for code, name in DEFAULT_GURUS.items():
+                    cached = db.get_guru_holdings(guru_code=code)
+                    if cached:
+                        cached_at = datetime.fromisoformat(cached[0]["cached_at"])
+                        age_days = (datetime.now() - cached_at).total_seconds() / 86400
+                        if age_days < 7:
+                            guru_count += 1
+                            print(f"  {name}: {len(cached)} holdings (cached)")
+                            continue
 
-    # ── STEP 2: Extract patterns ────────────────────────────────
-    print("\n" + "=" * 60)
-    print("STEP 2: Analyzing patterns across funds")
-    print("=" * 60)
+                    holdings_data, guru_name, quarter = fetch_guru_holdings(code)
+                    if holdings_data:
+                        db.cache_guru_holdings(code, guru_name or name, holdings_data, quarter)
+                        guru_count += 1
+                        print(f"  {guru_name or name}: {len(holdings_data)} holdings ({quarter})")
+                    else:
+                        print(f"  {name}: no data")
+                    time.sleep(0.5)
+            print(f"\n  Total gurus: {guru_count}")
+        except Exception as e:
+            print(f"  Guru fetch error: {e}")
 
-    if args.apply:
-        # Load cached for pattern extraction
+        # ── STEP 1d: Fetch Analyst Recommendations (Finnhub) ──
+        print("\n" + "=" * 60)
+        print("STEP 1d: Fetching analyst recommendations (Finnhub)")
+        print("=" * 60)
+        try:
+            from news import _load_api_keys
+            keys = _load_api_keys()
+            finnhub_key = os.environ.get("FINNHUB_API_KEY") or keys.get("FINNHUB_API_KEY", "")
+            if finnhub_key:
+                with VaultDB() as db:
+                    port_holdings = db.get_holdings()
+                port_tickers = [h["ticker"] for h in port_holdings]
+                check_tickers = list(set(port_tickers + ["XOM", "NVDA", "AMZN", "MSFT", "AAPL", "META", "LMT", "XLU"]))
+
+                from urllib.request import Request as Req, urlopen as uopen
+                checked = 0
+                for ticker in check_tickers:
+                    try:
+                        url = f"https://finnhub.io/api/v1/stock/recommendation?symbol={ticker}&token={finnhub_key}"
+                        req = Req(url, headers={"Accept": "application/json"})
+                        with uopen(req, timeout=10) as resp:
+                            recs = json.loads(resp.read())
+                        if recs:
+                            r = recs[0]
+                            bull = r.get('strongBuy', 0) + r.get('buy', 0)
+                            bear = r.get('sell', 0) + r.get('strongSell', 0)
+                            hold = r.get('hold', 0)
+                            signal = 'BULLISH' if bull > bear else 'MIXED' if bull == bear else 'BEARISH'
+                            print(f"  {ticker}: {bull} bullish / {hold} hold / {bear} bearish — {signal}")
+                            checked += 1
+                    except Exception:
+                        pass
+                print(f"\n  Checked {checked} tickers")
+            else:
+                print("  No FINNHUB_API_KEY — skipping")
+        except Exception as e:
+            print(f"  Analyst rec error: {e}")
+
+        # ── STEP 1e: Fetch Insider Transactions (Finnhub) ─────
+        print("\n" + "=" * 60)
+        print("STEP 1e: Fetching insider transactions (Finnhub)")
+        print("=" * 60)
+        try:
+            if finnhub_key:
+                from urllib.request import Request as Req, urlopen as uopen
+                insider_count = 0
+                for ticker in check_tickers:
+                    try:
+                        from_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+                        to_date = datetime.now().strftime("%Y-%m-%d")
+                        url = (f"https://finnhub.io/api/v1/stock/insider-transactions"
+                               f"?symbol={ticker}&from={from_date}&to={to_date}&token={finnhub_key}")
+                        req = Req(url, headers={"Accept": "application/json"})
+                        with uopen(req, timeout=10) as resp:
+                            data = json.loads(resp.read())
+                        txns = data.get("data", [])
+                        if txns:
+                            buys = [t for t in txns if t.get("transactionCode") == "P"]
+                            sells = [t for t in txns if t.get("transactionCode") == "S"]
+                            if buys or sells:
+                                # Save to DB
+                                with VaultDB() as db:
+                                    for txn in txns:
+                                        code = txn.get("transactionCode", "")
+                                        if code in ("P", "S"):
+                                            db.add_insider_txn(
+                                                ticker=ticker,
+                                                insider_name=txn.get("name"),
+                                                title=None,
+                                                txn_type="BUY" if code == "P" else "SELL",
+                                                shares=txn.get("share"),
+                                                price=txn.get("transactionPrice"),
+                                                value=abs((txn.get("share") or 0) * (txn.get("transactionPrice") or 0)),
+                                                txn_date=txn.get("transactionDate"),
+                                                filing_date=txn.get("filingDate"),
+                                                source="finnhub",
+                                            )
+                                print(f"  {ticker}: {len(buys)} buys, {len(sells)} sells — "
+                                      f"{'NET BUY' if len(buys) > len(sells) else 'NET SELL'}")
+                                insider_count += 1
+                    except Exception:
+                        pass
+                print(f"\n  Checked {len(check_tickers)} tickers, {insider_count} with activity")
+            else:
+                print("  No FINNHUB_API_KEY — skipping")
+        except Exception as e:
+            print(f"  Insider fetch error: {e}")
+
+    else:
+        # --analyze mode: load from DB
+        print("Loading cached data from vault.db...")
         with VaultDB() as db:
             all_analyses = db.get_all_fund_analyses()
+        print(f"  Loaded {len(all_analyses)} fund analyses")
 
-    patterns = extract_patterns(all_analyses, extra_data)
+    # ── STEP 2: Cross-reference with portfolio ─────────────────
+    print("\n" + "=" * 60)
+    print("STEP 2: Cross-referencing with your portfolio")
+    print("=" * 60)
 
-    # Rebuild consensus in DB after pattern extraction
+    # Rebuild consensus from 13F data
     with VaultDB() as db:
         db.rebuild_consensus()
 
-    if patterns:
-        print(f"\n  Funds analyzed: {patterns.get('num_funds', 0)}")
-        print(f"  Avg positions: {patterns.get('avg_positions', 'N/A')}")
-        print(f"  Avg top-5 concentration: {patterns.get('avg_top5_concentration', 'N/A')}%")
-        print(f"  Avg largest position: {patterns.get('avg_largest_position', 'N/A')}%")
-        consensus = patterns.get("consensus_holdings", [])
-        if consensus:
-            print(f"  Consensus picks: {', '.join(n for n, c in consensus[:5])}")
-    else:
-        print("\n  No fund data available. Run without --apply to fetch first.")
+    all_learnings = []
 
-    # ── STEP 3: Generate improvements ───────────────────────────
-    print("\n" + "=" * 60)
-    print("STEP 3: Generating improvements")
-    print("=" * 60)
-
-    improvements = generate_improvements(patterns)
-    for imp in improvements:
-        print(f"\n  [{imp['area']}]")
-        print(f"    {imp['recommendation'][:90]}...")
-
-    # ── STEP 4: Apply improvements to system files ──────────────
-    print("\n" + "=" * 60)
-    print("STEP 4: Applying improvements to system files")
-    print("=" * 60)
-
-    applied = apply_improvements(improvements)
-    for a in applied:
-        print(f"  + {a}")
-
-    if not applied:
-        print("  All improvements already applied (idempotent)")
-
-    # ── STEP 5: Save improvements to DB ─────────────────────────
-    print("\n" + "=" * 60)
-    print("STEP 5: Saving improvements to vault.db")
-    print("=" * 60)
-
-    now = datetime.now()
-    today = now.strftime("%Y-%m-%d")
     with VaultDB() as db:
-        # Clear previous learn_from_pros improvements
-        db.clear_improvements('learn_from_pros')
-        for imp in improvements:
-            db.add_improvement(
-                date=today,
-                imp_type='learn_from_pros',
-                category=imp['area'],
-                priority='MEDIUM',
-                finding=imp['finding'],
-                action=imp['recommendation'],
-                target_file=imp['applies_to'],
-                status='applied' if imp['applies_to'] in [a.split(' — ')[0] for a in applied] else 'active',
-                source='learn_from_pros.py',
-            )
-    print(f"  Saved {len(improvements)} improvements to DB")
+        # Portfolio cross-reference (the core learning)
+        portfolio_signals = cross_reference_portfolio(db)
+        all_learnings.extend(portfolio_signals)
 
-    # Print report to console
-    report = generate_report(patterns, improvements, applied)
-    print("\n" + report)
+        holdings_signals = [l for l in portfolio_signals if l["relevance"] == "HOLDING"]
+        watchlist_signals = [l for l in portfolio_signals if l["relevance"] == "WATCHLIST"]
 
+        print(f"\n  --- Your Holdings ---")
+        for l in holdings_signals:
+            tag = f"[{l['strength']} {l['direction']}]"
+            print(f"  {l['ticker']} {tag}: {l['detail'][:100]}")
+
+        if watchlist_signals:
+            print(f"\n  --- Your Watchlist ---")
+            for l in watchlist_signals:
+                tag = f"[{l['strength']} {l['direction']}]"
+                print(f"  {l['ticker']} {tag}: {l['detail'][:100]}")
+
+        if not holdings_signals and not watchlist_signals:
+            print("  No signals found for your portfolio. Add holdings to portfolio.md first.")
+
+    # ── STEP 3: Detect changes and patterns ────────────────────
     print("\n" + "=" * 60)
-    print("DONE")
+    print("STEP 3: Detecting changes and patterns")
     print("=" * 60)
-    print(f"\n  {len(all_analyses)} funds analyzed")
-    print(f"  {len(improvements)} improvements generated")
-    print(f"  {len(applied)} patches applied to system files")
-    print(f"  All data saved to vault.db")
+
+    with VaultDB() as db:
+        # ARK accumulation/distribution patterns
+        ark_patterns = detect_ark_patterns(db)
+        all_learnings.extend(ark_patterns)
+        if ark_patterns:
+            print(f"\n  --- ARK Patterns ---")
+            for l in ark_patterns:
+                print(f"  {l['ticker']} [{l['direction']}]: {l['detail']}")
+
+        # Guru activity (new buys, sells, additions)
+        guru_changes = detect_guru_activity(db)
+        all_learnings.extend(guru_changes)
+        if guru_changes:
+            print(f"\n  --- Guru Activity ---")
+            for l in guru_changes[:10]:  # Show top 10
+                print(f"  {l['ticker']} [{l['direction']}]: {l['detail']}")
+            if len(guru_changes) > 10:
+                print(f"  ... and {len(guru_changes) - 10} more")
+
+        # Insider cluster buying
+        insider_clusters = detect_insider_clusters(db)
+        all_learnings.extend(insider_clusters)
+        if insider_clusters:
+            print(f"\n  --- Insider Cluster Buying ---")
+            for l in insider_clusters:
+                print(f"  {l['ticker']}: {l['detail']}")
+
+        if not ark_patterns and not guru_changes and not insider_clusters:
+            print("  No significant changes detected.")
+
+    # ── STEP 4: Find new candidates ────────────────────────────
+    print("\n" + "=" * 60)
+    print("STEP 4: New candidates (strong multi-source signals)")
+    print("=" * 60)
+
+    with VaultDB() as db:
+        candidates = find_new_candidates(db)
+        all_learnings.extend(candidates)
+
+        if candidates:
+            for l in candidates:
+                print(f"  {l['ticker']} [{l['strength']}]: {l['detail']}")
+        else:
+            print("  No new candidates with multi-source support found.")
+
+    # ── STEP 5: Save learnings to DB ───────────────────────────
+    print("\n" + "=" * 60)
+    print("STEP 5: Saving learnings to vault.db")
+    print("=" * 60)
+
+    with VaultDB() as db:
+        saved = save_learnings(db, all_learnings)
+        print(f"  Saved {saved} learnings to DB")
+
+    # ── Summary ────────────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print("DONE — Learnings Summary")
+    print("=" * 60)
+
+    # Count by category
+    by_cat = Counter(l["category"] for l in all_learnings)
+    for cat, count in by_cat.most_common():
+        print(f"  {cat}: {count}")
+
+    # Count by direction
+    bullish = sum(1 for l in all_learnings if l.get("direction") == "BULLISH")
+    bearish = sum(1 for l in all_learnings if l.get("direction") == "BEARISH")
+    mixed = sum(1 for l in all_learnings if l.get("direction") in ("MIXED", "NEUTRAL"))
+    print(f"\n  Bullish: {bullish} | Bearish: {bearish} | Mixed: {mixed}")
+    print(f"  Total: {len(all_learnings)} learnings")
+
+    risk_flags = [l for l in all_learnings if l["category"] == "risk_flag"]
+    if risk_flags:
+        print(f"\n  ⚠ RISK FLAGS:")
+        for r in risk_flags:
+            print(f"    {r['ticker']}: {r['detail'][:80]}")
+
+    print(f"\n  View full summary: python3 tools/learn_from_pros.py --summary")
+    print(f"  Learnings feed into your next report automatically via vault.db")
 
 
 if __name__ == "__main__":
     main()
+
