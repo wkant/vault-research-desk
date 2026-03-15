@@ -930,6 +930,210 @@ def cmd_weekly(args):
     print()
 
 
+def cmd_project(args):
+    """5-year investment projection calculator."""
+    sys.path.insert(0, SCRIPT_DIR)
+    from db import VaultDB
+
+    with VaultDB() as db:
+        risk = db.risk_dashboard()
+
+    current = risk['total_value'] if risk else 0
+
+    # Parse args or use defaults from portfolio
+    monthly = 4500
+    years = 5
+    if args:
+        for a in args:
+            try:
+                val = float(a.replace('$', '').replace(',', ''))
+                if val > 100:
+                    monthly = val
+                else:
+                    years = int(val)
+            except ValueError:
+                pass
+
+    scenarios = [
+        ("Conservative (7%)", 0.07),
+        ("Base case (12%)", 0.12),
+        ("Aggressive (18%)", 0.18),
+    ]
+
+    print()
+    print(f"{'=' * 62}")
+    print(f"  INVESTMENT PROJECTION — {years}-Year Outlook")
+    print(f"{'=' * 62}")
+    print(f"  Starting portfolio: ${current:,.2f}")
+    print(f"  Monthly investment: ${monthly:,.0f}")
+    print(f"  Total capital over {years}yr: ${current + monthly * 12 * years:,.0f}")
+    print()
+
+    print(f"  {'Year':<6}", end="")
+    for name, _ in scenarios:
+        label = name.split("(")[0].strip()
+        print(f"  {label:>16}", end="")
+    print()
+    print(f"  {'─' * 56}")
+
+    for year in range(1, years + 1):
+        months = year * 12
+        print(f"  {year:<6}", end="")
+        for name, rate in scenarios:
+            monthly_rate = rate / 12
+            # Future value of starting balance + future value of annuity
+            fv_start = current * (1 + monthly_rate) ** months
+            fv_monthly = monthly * (((1 + monthly_rate) ** months - 1) / monthly_rate)
+            total = fv_start + fv_monthly
+            print(f"  ${total:>14,.0f}", end="")
+        print()
+
+    total_invested = current + monthly * 12 * years
+    print(f"  {'─' * 56}")
+    print(f"  {'Invested':<6}  ${total_invested:>14,.0f}  ${total_invested:>14,.0f}  ${total_invested:>14,.0f}")
+
+    # Profit row
+    print(f"  {'Profit':<6}", end="")
+    for name, rate in scenarios:
+        months = years * 12
+        monthly_rate = rate / 12
+        fv_start = current * (1 + monthly_rate) ** months
+        fv_monthly = monthly * (((1 + monthly_rate) ** months - 1) / monthly_rate)
+        total = fv_start + fv_monthly
+        profit = total - total_invested
+        print(f"  ${profit:>14,.0f}", end="")
+    print()
+
+    # ROI row
+    print(f"  {'ROI':<6}", end="")
+    for name, rate in scenarios:
+        months = years * 12
+        monthly_rate = rate / 12
+        fv_start = current * (1 + monthly_rate) ** months
+        fv_monthly = monthly * (((1 + monthly_rate) ** months - 1) / monthly_rate)
+        total = fv_start + fv_monthly
+        roi = (total - total_invested) / total_invested * 100
+        print(f"  {roi:>13.0f}%", end="")
+    print()
+
+    print(f"{'=' * 62}")
+
+    # Milestone calculator
+    print()
+    print("  MILESTONES:")
+    for target_name, target in [("$50K", 50000), ("$100K", 100000), ("$250K", 250000)]:
+        # Use base case rate to estimate months to target
+        r = 0.12 / 12
+        # Solve: current*(1+r)^n + monthly*((1+r)^n - 1)/r = target
+        # Iterate
+        for m in range(1, years * 12 + 1):
+            fv = current * (1 + r) ** m + monthly * (((1 + r) ** m - 1) / r)
+            if fv >= target:
+                y, mo = divmod(m, 12)
+                print(f"    {target_name}: ~{y}y {mo}m (base case)")
+                break
+        else:
+            print(f"    {target_name}: beyond {years} years")
+
+    print(f"{'=' * 62}")
+    print()
+
+
+def cmd_plan(args):
+    """Show current action plan from notes/."""
+    import glob
+
+    notes_dir = os.path.join(PROJECT_ROOT, "notes")
+    if not os.path.isdir(notes_dir):
+        print("No notes/ directory. No active plans.")
+        return
+
+    # Find most recent plan
+    plans = sorted(glob.glob(os.path.join(notes_dir, "*.md")), reverse=True)
+    if not plans:
+        print("No plans found in notes/")
+        return
+
+    if args:
+        # Search for matching file
+        target = args[0].lower()
+        match = next((p for p in plans if target in os.path.basename(p).lower()), None)
+        if match:
+            plans = [match]
+
+    # Show most recent or specified plan
+    path = plans[0]
+    filename = os.path.basename(path)
+
+    print()
+    print(f"{'=' * 55}")
+    print(f"  ACTIVE PLAN: {filename}")
+    print(f"{'=' * 55}")
+    print()
+
+    with open(path, 'r') as f:
+        content = f.read()
+
+    # Print with indentation
+    for line in content.split('\n'):
+        if line.startswith('#'):
+            print(f"  {line}")
+        else:
+            print(f"  {line}")
+
+    print()
+    if len(plans) > 1:
+        print(f"  Other plans: {', '.join(os.path.basename(p) for p in plans[1:4])}")
+    print(f"{'=' * 55}")
+    print()
+
+
+def cmd_news_impact(args):
+    """Show news that impacts active theses."""
+    sys.path.insert(0, SCRIPT_DIR)
+    from db import VaultDB
+
+    days = 3
+    if args:
+        try:
+            days = int(args[0])
+        except ValueError:
+            pass
+
+    with VaultDB() as db:
+        news = db.get_thesis_relevant_news(days=days)
+
+    if not news:
+        print(f"No thesis-relevant news in last {days} days.")
+        return
+
+    print()
+    print(f"{'=' * 60}")
+    print(f"  NEWS vs ACTIVE THESES (last {days} days)")
+    print(f"{'=' * 60}")
+
+    contradictions = [n for n in news if n['contradicts']]
+    supporting = [n for n in news if not n['contradicts']]
+
+    if contradictions:
+        print()
+        print(f"  CONTRADICTING YOUR THESIS ({len(contradictions)}):")
+        for n in contradictions[:8]:
+            sent = f"[{n['sentiment']:+.2f}]" if n['sentiment'] else ""
+            print(f"  {n['ticker']:<7} {sent:<8} {n['headline'][:55]}")
+            print(f"          Your thesis: {n['thesis_direction']} — this news pushes against it")
+
+    if supporting:
+        print()
+        print(f"  SUPPORTING ({len(supporting)}):")
+        for n in supporting[:8]:
+            sent = f"[{n['sentiment']:+.2f}]" if n['sentiment'] else ""
+            print(f"  {n['ticker']:<7} {sent:<8} {n['headline'][:55]}")
+
+    print(f"{'=' * 60}")
+    print()
+
+
 def cmd_help():
     """Print help."""
     print()
@@ -1020,6 +1224,9 @@ COMMANDS = {
     "peers":       lambda args: cmd_peers(args),
     "skeleton":    lambda args: cmd_skeleton(args),
     "weekly":      lambda args: cmd_weekly(args),
+    "project":     lambda args: cmd_project(args),
+    "plan":        lambda args: cmd_plan(args),
+    "news-impact": lambda args: cmd_news_impact(args),
     "audit":       lambda args: cmd_audit(args),
     "help":        lambda args: cmd_help(),
 }

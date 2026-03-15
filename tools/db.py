@@ -1780,7 +1780,7 @@ class VaultDB:
                 thesis = next((t for t in theses if t['ticker'] == n['ticker']), None)
                 if thesis:
                     sentiment = n['sentiment'] or 0
-                    direction = thesis.get('direction', 'BUY')
+                    direction = thesis['direction'] if thesis['direction'] else 'BUY'
                     # Check if news contradicts thesis
                     contradicts = (direction in ('BUY', 'HOLD') and sentiment < -0.3) or \
                                   (direction in ('SELL', 'AVOID') and sentiment > 0.3)
@@ -1957,6 +1957,16 @@ class VaultDB:
             lines.append(f"  Score: {winners}W / {losers}L")
         else:
             lines.append("  No active watchlist picks.")
+
+        # ── Thesis-Relevant News ──
+        thesis_news = self.get_thesis_relevant_news(days=3)
+        contradictions = [n for n in thesis_news if n['contradicts']]
+        if contradictions:
+            lines.append("")
+            lines.append(f"  NEWS ALERTS ({len(contradictions)} contradicting your theses)")
+            lines.append(f"  {'─' * 52}")
+            for n in contradictions[:3]:
+                lines.append(f"  {n['ticker']:<7} vs {n['thesis_direction']}: {n['headline'][:42]}")
 
         # ── Smart Money Learnings ──
         learnings = self.get_unconsumed_learnings(limit=10)

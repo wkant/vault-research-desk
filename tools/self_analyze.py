@@ -339,6 +339,7 @@ def analyze_report_quality(reports):
     required_sections = [
         "What's Happening", "Your Portfolio", "What to Buy",
         "What to Avoid", "Biggest Risks", "Gut Check", "Bottom Line",
+        "Search Log", "Validation Summary",
     ]
 
     for report in reports:
