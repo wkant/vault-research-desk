@@ -1614,6 +1614,34 @@ class VaultDB:
         lines.append(f"  MORNING BRIEFING — {now.strftime('%A, %B %d %Y  %H:%M')}")
         lines.append(f"{'=' * 58}")
 
+        # ── Market Snapshot ──
+        snap = self.conn.execute(
+            "SELECT * FROM market_snapshots ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        if snap:
+            lines.append("")
+            lines.append(f"  MARKET ({snap['date']})")
+            lines.append(f"  {'─' * 52}")
+            parts = []
+            if snap['spy']:
+                parts.append(f"S&P {snap['spy']:,.0f}")
+            if snap['vix']:
+                vix_warn = " !" if snap['vix'] > 25 else ""
+                parts.append(f"VIX {snap['vix']:.1f}{vix_warn}")
+            if snap['oil']:
+                parts.append(f"Oil ${snap['oil']:.0f}")
+            if snap['gold']:
+                parts.append(f"Gold ${snap['gold']:,.0f}")
+            if snap['dxy']:
+                parts.append(f"DXY {snap['dxy']:.1f}")
+            if snap['ten_year']:
+                parts.append(f"10Y {snap['ten_year']:.2f}%")
+            lines.append(f"  {' | '.join(parts)}")
+            if snap['breadth_200']:
+                b200 = snap['breadth_200']
+                health = "Healthy" if b200 > 70 else "Weakening" if b200 > 40 else "Bear-like"
+                lines.append(f"  Breadth: {b200:.0f}% above 200 DMA — {health}")
+
         # ── Portfolio ──
         holdings = self.portfolio_dashboard()
         risk = self.risk_dashboard()
@@ -1742,6 +1770,147 @@ class VaultDB:
         lines.append(f"{'=' * 58}")
         lines.append("")
 
+        return "\n".join(lines)
+
+    def changes_since_last_report(self):
+        """Show what changed since the last report was generated."""
+        lines = []
+        now = datetime.now()
+
+        # Find last report date
+        last_report = self.conn.execute("""
+            SELECT date, filename FROM reports ORDER BY date DESC LIMIT 1
+        """).fetchone()
+
+        if not last_report:
+            return "No reports found. Run `report` to generate your first one."
+
+        report_date = last_report['date']
+        days_since = (now.date() - datetime.strptime(report_date, '%Y-%m-%d').date()).days
+
+        lines.append("")
+        lines.append(f"{'=' * 58}")
+        lines.append(f"  CHANGES SINCE LAST REPORT")
+        lines.append(f"{'=' * 58}")
+        lines.append(f"  Last report: {last_report['filename']} ({days_since} days ago)")
+        lines.append("")
+
+        # ── Price changes for holdings ──
+        holdings = self.portfolio_dashboard()
+        if holdings:
+            lines.append(f"  HOLDING PRICE CHANGES")
+            lines.append(f"  {'─' * 52}")
+
+            for h in holdings:
+                ticker = h['ticker']
+                current = h['current_price'] or 0
+
+                # Get price at report date from cache
+                old_price_row = self.conn.execute("""
+                    SELECT price FROM price_cache
+                    WHERE ticker=? AND date=?
+                    LIMIT 1
+                """, (ticker, report_date)).fetchone()
+
+                if old_price_row and old_price_row['price']:
+                    old_price = old_price_row['price']
+                    change_pct = (current - old_price) / old_price * 100
+                    direction = "+" if change_pct >= 0 else ""
+                    lines.append(f"  {ticker:<7} ${old_price:>7.2f} -> ${current:>7.2f}  ({direction}{change_pct:.1f}%)")
+                else:
+                    lines.append(f"  {ticker:<7} no data at report date -> ${current:>7.2f}")
+            lines.append("")
+
+        # ── Market changes ──
+        old_snap = self.conn.execute(
+            "SELECT * FROM market_snapshots WHERE date=?", (report_date,)
+        ).fetchone()
+        new_snap = self.conn.execute(
+            "SELECT * FROM market_snapshots ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+
+        if old_snap and new_snap and old_snap['date'] != new_snap['date']:
+            lines.append(f"  MARKET CHANGES")
+            lines.append(f"  {'─' * 52}")
+            macro_items = [
+                ("S&P 500", old_snap['spy'], new_snap['spy']),
+                ("VIX", old_snap['vix'], new_snap['vix']),
+                ("Oil", old_snap['oil'], new_snap['oil']),
+                ("Gold", old_snap['gold'], new_snap['gold']),
+                ("DXY", old_snap['dxy'], new_snap['dxy']),
+                ("10Y", old_snap['ten_year'], new_snap['ten_year']),
+            ]
+            for name, old_val, new_val in macro_items:
+                if old_val and new_val:
+                    chg = (new_val - old_val) / old_val * 100
+                    direction = "+" if chg >= 0 else ""
+                    lines.append(f"  {name:<10} {old_val:>8.2f} -> {new_val:>8.2f}  ({direction}{chg:.1f}%)")
+            lines.append("")
+
+        # ── New smart money learnings since report ──
+        new_learnings = self.conn.execute("""
+            SELECT * FROM learnings
+            WHERE created_at > ? AND consumed=0
+            ORDER BY
+                CASE strength WHEN 'STRONG' THEN 1 WHEN 'MODERATE' THEN 2 ELSE 3 END
+            LIMIT 10
+        """, (report_date,)).fetchall()
+
+        if new_learnings:
+            lines.append(f"  NEW SMART MONEY SIGNALS ({len(new_learnings)})")
+            lines.append(f"  {'─' * 52}")
+            for l in new_learnings[:7]:
+                strength = l['strength'] or ''
+                ticker = l['ticker'] or 'PORTFOLIO'
+                tag = f"[{strength}]" if strength else ""
+                lines.append(f"  {ticker:<7} {tag:<10} {l['detail'][:45]}")
+            if len(new_learnings) > 7:
+                lines.append(f"  ... and {len(new_learnings) - 7} more")
+            lines.append("")
+
+        # ── New insider activity since report ──
+        new_insider = self.conn.execute("""
+            SELECT ticker, insider_name, txn_type, shares, value, txn_date
+            FROM insider_txns
+            WHERE txn_date > ? AND txn_type IN ('BUY', 'SELL')
+            ORDER BY txn_date DESC
+            LIMIT 10
+        """, (report_date,)).fetchall()
+
+        if new_insider:
+            buys = [i for i in new_insider if i['txn_type'] == 'BUY']
+            sells = [i for i in new_insider if i['txn_type'] == 'SELL']
+            lines.append(f"  NEW INSIDER ACTIVITY ({len(buys)} buys, {len(sells)} sells)")
+            lines.append(f"  {'─' * 52}")
+            for i in new_insider[:5]:
+                val = f"${i['value']:,.0f}" if i['value'] and i['value'] > 0 else ""
+                lines.append(f"  {i['txn_date']}  {i['ticker']:<7} {i['txn_type']:<5} {val}")
+            lines.append("")
+
+        # ── Thesis age check ──
+        stale = self.conn.execute("""
+            SELECT ticker, thesis, date_opened,
+                   julianday('now') - julianday(date_opened) as age_days
+            FROM theses
+            WHERE status='ACTIVE'
+              AND julianday('now') - julianday(date_opened) > 90
+            ORDER BY age_days DESC
+        """).fetchall()
+
+        if stale:
+            lines.append(f"  STALE THESES (>90 days old)")
+            lines.append(f"  {'─' * 52}")
+            for s in stale:
+                lines.append(f"  {s['ticker']:<7} {int(s['age_days'])}d old  {s['thesis'][:40]}")
+            lines.append("")
+
+        if days_since == 0:
+            lines.append("  Report generated today — run `report` again if market has moved.")
+        elif days_since >= 7:
+            lines.append(f"  {days_since} days since last report — consider running `report`.")
+
+        lines.append(f"{'=' * 58}")
+        lines.append("")
         return "\n".join(lines)
 
 
@@ -2061,6 +2230,9 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "morning":
         with VaultDB() as db:
             print(db.morning_briefing())
+    elif len(sys.argv) > 1 and sys.argv[1] == "changes":
+        with VaultDB() as db:
+            print(db.changes_since_last_report())
     elif len(sys.argv) > 1 and sys.argv[1] == "consensus":
         with VaultDB() as db:
             print("\n=== Consensus Holdings ===\n")

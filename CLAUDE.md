@@ -14,7 +14,20 @@ A personal investment research system with 4 analysis phases, adversarial valida
 - `sync [file]` → import IBKR CSV export into portfolio.md
 - `self-analyze` → system self-review: mistakes, patterns, improvements
 - `learn-from-pros` → fetch smart money data from 5 sources, cross-reference portfolio, save learnings to DB
-- `morning` → one-command briefing: portfolio, theses, watchlist, learnings, issues
+- `morning` → one-command briefing: portfolio, market, theses, watchlist, learnings, issues
+- `changes` → what moved since last report (prices, smart money, insider activity)
+
+## Unified CLI
+```bash
+python3 tools/vault.py morning       # Start here every day
+python3 tools/vault.py changes       # What changed since last report
+python3 tools/vault.py score         # Performance scorecard
+python3 tools/vault.py alerts        # Check alert thresholds
+python3 tools/vault.py screen        # S&P 500 screener
+python3 tools/vault.py news GOOGL    # News for ticker
+python3 tools/vault.py help          # Full command reference
+# Shortcuts: m=morning, s=score, a=alerts, n=news, c=changes, h=help
+```
 
 ## Project Structure
 ```
@@ -42,6 +55,7 @@ vault_research_desk/
 │   ├── correlation.py         ← Portfolio correlation matrix + risk score
 │   ├── insider_check.py       ← SEC Form 4 insider buying/selling signals
 │   ├── watchlist_extract.py   ← Auto-extract watchlist picks from reports
+│   ├── vault.py               ← Unified CLI (single entry point for all tools)
 │   ├── db.py                  ← SQLite database module (VaultDB)
 │   ├── news.py                ← News fetcher (Finnhub + Marketaux) + sentiment
 │   ├── smart_money.py         ← ARK daily trades + Dataroma guru holdings
