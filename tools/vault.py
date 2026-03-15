@@ -61,6 +61,133 @@ def cmd_changes():
         print(db.changes_since_last_report())
 
 
+def cmd_health():
+    """System health check — validates everything is working."""
+    sys.path.insert(0, SCRIPT_DIR)
+
+    checks = []
+    warnings = []
+
+    # 1. Database
+    try:
+        from db import VaultDB, DB_PATH
+        if os.path.exists(DB_PATH):
+            size_kb = os.path.getsize(DB_PATH) / 1024
+            checks.append(f"Database: OK ({size_kb:.0f} KB)")
+            with VaultDB() as db:
+                holdings = db.get_holdings()
+                checks.append(f"Holdings: {len(holdings)} positions in DB")
+                if not holdings:
+                    warnings.append("No holdings in DB — run `vault fetch` first")
+        else:
+            warnings.append("Database: vault.db not found — will be created on first use")
+    except Exception as e:
+        warnings.append(f"Database: ERROR — {e}")
+
+    # 2. Portfolio.md
+    portfolio_path = os.path.join(PROJECT_ROOT, "portfolio.md")
+    if os.path.exists(portfolio_path):
+        size = os.path.getsize(portfolio_path)
+        checks.append(f"portfolio.md: OK ({size} bytes)")
+        backup = portfolio_path + ".backup"
+        if os.path.exists(backup):
+            checks.append(f"portfolio.md.backup: exists (safety net)")
+    else:
+        warnings.append("portfolio.md: NOT FOUND — create it before running reports")
+
+    # 3. API Keys
+    finnhub = os.environ.get("FINNHUB_API_KEY", "")
+    marketaux = os.environ.get("MARKETAUX_API_KEY", "")
+    if finnhub:
+        checks.append(f"FINNHUB_API_KEY: set ({finnhub[:4]}...)")
+    else:
+        warnings.append("FINNHUB_API_KEY: not set — news + analyst data unavailable")
+    if marketaux:
+        checks.append(f"MARKETAUX_API_KEY: set ({marketaux[:4]}...)")
+    else:
+        warnings.append("MARKETAUX_API_KEY: not set — sentiment scoring unavailable")
+
+    # 4. Data freshness
+    try:
+        with VaultDB() as db:
+            latest_quote = db.conn.execute(
+                "SELECT max(fetched_at) as latest FROM price_cache"
+            ).fetchone()
+            if latest_quote and latest_quote['latest']:
+                from datetime import datetime as dt
+                fetched = dt.fromisoformat(latest_quote['latest'])
+                age_hours = (dt.now() - fetched).total_seconds() / 3600
+                if age_hours < 1:
+                    checks.append(f"Price data: fresh ({age_hours:.0f}min old)")
+                elif age_hours < 24:
+                    checks.append(f"Price data: {age_hours:.0f}h old")
+                else:
+                    warnings.append(f"Price data: STALE ({age_hours:.0f}h old) — run `vault fetch`")
+            else:
+                warnings.append("Price data: NO DATA — run `vault fetch`")
+
+            # Reports
+            report_count = db.conn.execute("SELECT count(*) as c FROM reports").fetchone()
+            checks.append(f"Reports: {report_count['c']} in DB")
+
+            # Learnings
+            learnings = db.conn.execute(
+                "SELECT count(*) as c FROM learnings WHERE consumed=0"
+            ).fetchone()
+            if learnings['c'] > 0:
+                checks.append(f"Unconsumed learnings: {learnings['c']}")
+
+    except Exception as e:
+        warnings.append(f"Data check: ERROR — {e}")
+
+    # 5. Tool imports
+    tool_ok = 0
+    tool_fail = []
+    for mod in ['data_fetcher', 'screener', 'alerts', 'scorer', 'correlation',
+                'news', 'insider_check', 'smart_money', 'thesis_tracker',
+                'watchlist_extract', 'learn_from_pros', 'html_report', 'ibkr_sync']:
+        try:
+            __import__(mod)
+            tool_ok += 1
+        except Exception as e:
+            tool_fail.append(f"{mod}: {e}")
+
+    checks.append(f"Tools: {tool_ok}/13 import OK")
+    for f in tool_fail:
+        warnings.append(f"Tool import failed: {f}")
+
+    # 6. Reports directory
+    reports_dir = os.path.join(PROJECT_ROOT, "reports")
+    if os.path.isdir(reports_dir):
+        import glob
+        report_files = glob.glob(os.path.join(reports_dir, "report_*.md"))
+        checks.append(f"Reports dir: {len(report_files)} report files")
+    else:
+        warnings.append("Reports dir: reports/ not found — will be created on first report")
+
+    # Print results
+    print()
+    print(f"{'=' * 50}")
+    print(f"  SYSTEM HEALTH CHECK")
+    print(f"{'=' * 50}")
+    print()
+    for c in checks:
+        print(f"  [OK] {c}")
+    if warnings:
+        print()
+        for w in warnings:
+            print(f"  [!!] {w}")
+    else:
+        print()
+        print("  All systems operational.")
+    print()
+    total = len(checks) + len(warnings)
+    print(f"  {len(checks)}/{total} checks passed"
+          f"{f', {len(warnings)} warnings' if warnings else ''}")
+    print(f"{'=' * 50}")
+    print()
+
+
 def cmd_help():
     """Print help."""
     print()
@@ -92,6 +219,7 @@ def cmd_help():
     print("    vault theses             Show active investment theses")
     print()
     print("  System:")
+    print("    vault health             System health check")
     print("    vault self-analyze       System self-review")
     print("    vault dashboard          Portfolio P&L (quick)")
     print("    vault help               This help")
@@ -115,6 +243,7 @@ COMMANDS = {
     "theses":      lambda args: run_tool("thesis_tracker.py", args if args else []),
     "smart-money": lambda args: run_tool("db.py", ["smart-money"] + (args or [])),
     "fetch":       lambda args: run_tool("data_fetcher.py", args, timeout=600),
+    "health":      lambda args: cmd_health(),
     "self-analyze": lambda args: run_tool("self_analyze.py"),
     "dashboard":   lambda args: run_tool("db.py", ["dashboard"]),
     "help":        lambda args: cmd_help(),
