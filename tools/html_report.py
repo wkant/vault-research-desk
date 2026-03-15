@@ -406,6 +406,42 @@ def save_html_report(md_text, output_path):
     return output_path
 
 
+def run_post_report_hooks(md_path, md_text):
+    """Auto-extract theses and watchlist picks after report generation."""
+    import subprocess
+
+    report_name = os.path.basename(md_path)
+    print(f"\nPost-report hooks for {report_name}:")
+
+    # 1. Extract theses
+    try:
+        result = subprocess.run(
+            [sys.executable, os.path.join(SCRIPT_DIR, "thesis_tracker.py"), "extract", md_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        for line in result.stdout.strip().split("\n"):
+            if line.strip():
+                print(f"  [thesis] {line.strip()}")
+        if result.returncode != 0 and result.stderr.strip():
+            print(f"  [thesis] Warning: {result.stderr.strip()[:100]}", file=sys.stderr)
+    except Exception as e:
+        print(f"  [thesis] Could not extract: {e}", file=sys.stderr)
+
+    # 2. Extract watchlist picks
+    try:
+        result = subprocess.run(
+            [sys.executable, os.path.join(SCRIPT_DIR, "watchlist_extract.py"), md_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        for line in result.stdout.strip().split("\n"):
+            if line.strip():
+                print(f"  [watchlist] {line.strip()}")
+        if result.returncode != 0 and result.stderr.strip():
+            print(f"  [watchlist] Warning: {result.stderr.strip()[:100]}", file=sys.stderr)
+    except Exception as e:
+        print(f"  [watchlist] Could not extract: {e}", file=sys.stderr)
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python3 tools/html_report.py <markdown_file.md>")
@@ -422,6 +458,9 @@ def main():
 
     html_path = md_path.rsplit(".", 1)[0] + ".html"
     save_html_report(md_text, html_path)
+
+    # Auto-extract theses and watchlist from the report
+    run_post_report_hooks(md_path, md_text)
 
 
 if __name__ == "__main__":
