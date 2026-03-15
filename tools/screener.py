@@ -348,12 +348,31 @@ def print_results(all_results, top_n):
     # Top candidates by composite score
     ranked = sorted(all_results, key=lambda x: x["score"], reverse=True)[:top_n]
     if ranked:
+        # Load watchlist and active theses for overlap detection
+        watchlist_tickers = set()
+        thesis_tickers = set()
+        try:
+            with VaultDB() as db:
+                for w in db.get_active_watchlist():
+                    watchlist_tickers.add(w['ticker'])
+                for t in db.get_active_theses():
+                    thesis_tickers.add(t['ticker'])
+        except Exception:
+            pass
+
         print(f"\nTOP CANDIDATES (by composite score):")
         print(f"  {'Rank':<6} {'Ticker':<8} {'Score':>6} {'Signals'}")
         print(f"  {'─' * 55}")
         for i, r in enumerate(ranked, 1):
             sig_str = ", ".join(r["signals"])
-            print(f"  {i:<6} {r['ticker']:<8} {r['score']:>+5}  {sig_str}")
+            # Flag overlap with existing watchlist or theses
+            tags = []
+            if r['ticker'] in watchlist_tickers:
+                tags.append("ON WATCHLIST")
+            if r['ticker'] in thesis_tickers:
+                tags.append("HAS THESIS")
+            tag_str = f"  [{', '.join(tags)}]" if tags else ""
+            print(f"  {i:<6} {r['ticker']:<8} {r['score']:>+5}  {sig_str}{tag_str}")
 
     print()
 

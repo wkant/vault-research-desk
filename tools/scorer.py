@@ -36,8 +36,8 @@ def fetch_current_price(ticker):
             cached = db.get_cached_quote(ticker, max_age_minutes=15)
             if cached and cached.get('price'):
                 return cached['price']
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  Warning: DB cache read failed for {ticker}: {e}", file=sys.stderr)
 
     # Fall back to yfinance
     try:
@@ -52,8 +52,8 @@ def fetch_current_price(ticker):
             try:
                 with VaultDB() as db:
                     db.cache_quote(ticker, {'price': price})
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  Warning: could not cache price for {ticker}: {e}", file=sys.stderr)
 
         return price
     except Exception:
