@@ -1555,6 +1555,133 @@ class VaultDB:
             'over_concentrated': [c for c in concentrations if c['over_limit']],
         }
 
+    def morning_briefing(self):
+        """One-command morning overview: portfolio + risk + theses + watchlist + learnings."""
+        now = datetime.now()
+        lines = []
+
+        lines.append("")
+        lines.append(f"{'=' * 58}")
+        lines.append(f"  MORNING BRIEFING — {now.strftime('%A, %B %d %Y  %H:%M')}")
+        lines.append(f"{'=' * 58}")
+
+        # ── Portfolio ──
+        holdings = self.portfolio_dashboard()
+        risk = self.risk_dashboard()
+
+        lines.append("")
+        lines.append(f"  PORTFOLIO ({risk.get('position_count', 0)} positions)")
+        lines.append(f"  {'─' * 52}")
+        lines.append(f"  {'Ticker':<7} {'Shares':>8} {'Cost':>8} {'Price':>8} {'P&L':>8} {'Alloc':>6}")
+        lines.append(f"  {'─' * 52}")
+
+        concentrations = {c['ticker']: c['pct'] for c in risk.get('concentrations', [])}
+        for h in holdings:
+            pnl_str = f"{h['pnl_pct'] or 0:+.1f}%"
+            alloc = concentrations.get(h['ticker'], 0)
+            warn = " !" if alloc > 15 else ""
+            lines.append(
+                f"  {h['ticker']:<7} {h['shares']:>8.4f} "
+                f"${h['cost_basis']:>6.0f} ${h['current_price'] or 0:>6.2f} "
+                f"{pnl_str:>7} {alloc:>5.1f}%{warn}"
+            )
+
+        if risk:
+            lines.append(f"  {'─' * 52}")
+            lines.append(f"  Total: ${risk['total_value']:,.2f}  "
+                         f"Cost: ${risk['total_cost']:,.2f}  "
+                         f"P&L: {risk['drawdown_pct']:+.2f}%")
+            if risk['circuit_breaker']:
+                lines.append(f"  *** CIRCUIT BREAKER: Drawdown exceeds -15% ***")
+            over = risk.get('over_concentrated', [])
+            if over:
+                names = ", ".join(f"{c['ticker']} ({c['pct']:.0f}%)" for c in over)
+                lines.append(f"  Over-concentrated: {names}")
+
+        # ── Benchmark ──
+        bench = self.conn.execute(
+            "SELECT * FROM benchmarks ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+        if bench:
+            lines.append(f"  vs VOO: alpha {bench['alpha']:+.2f}%  "
+                         f"(portfolio {bench['portfolio_pct']:+.2f}% | VOO {bench['voo_pct']:+.2f}%)")
+
+        # ── Active Theses ──
+        theses = self.get_active_theses()
+        lines.append("")
+        lines.append(f"  ACTIVE THESES ({len(theses)})")
+        lines.append(f"  {'─' * 52}")
+        if theses:
+            for t in theses[:8]:
+                age = (now.date() - datetime.strptime(t['date_opened'], '%Y-%m-%d').date()).days
+                stale = " STALE" if age > 90 else ""
+                direction = t['direction'] if 'direction' in t.keys() else '?'
+                lines.append(f"  {t['ticker']:<7} {direction:<6} {age:>3}d  {t['thesis'][:35]}{stale}")
+        else:
+            lines.append("  No active theses. Run: thesis_tracker.py extract <report>")
+
+        # ── Watchlist ──
+        watchlist = self.watchlist_performance()
+        lines.append("")
+        lines.append(f"  WATCHLIST ({len(watchlist)} active picks)")
+        lines.append(f"  {'─' * 52}")
+        if watchlist:
+            winners = 0
+            losers = 0
+            for w in watchlist[:6]:
+                ret = w['return_pct']
+                if ret is not None:
+                    tag = f"{ret:+.1f}%"
+                    if ret > 0:
+                        winners += 1
+                    else:
+                        losers += 1
+                else:
+                    tag = "  n/a"
+                conv = w['conviction'] if w['conviction'] else '?'
+                lines.append(f"  {w['ticker']:<7} {conv:<8} rec'd ${w['price_at_rec'] or 0:>6.0f}  now {tag}")
+            if len(watchlist) > 6:
+                lines.append(f"  ... and {len(watchlist) - 6} more")
+            lines.append(f"  Score: {winners}W / {losers}L")
+        else:
+            lines.append("  No active watchlist picks.")
+
+        # ── Smart Money Learnings ──
+        learnings = self.get_unconsumed_learnings(limit=10)
+        lines.append("")
+        lines.append(f"  SMART MONEY LEARNINGS ({len(learnings)} new)")
+        lines.append(f"  {'─' * 52}")
+        if learnings:
+            for l in learnings[:5]:
+                strength = l['strength'] or ''
+                ticker = l['ticker'] or 'PORTFOLIO'
+                tag = f"[{strength}]" if strength else ""
+                detail = l['detail'][:50]
+                lines.append(f"  {ticker:<7} {tag:<10} {detail}")
+            if len(learnings) > 5:
+                lines.append(f"  ... and {len(learnings) - 5} more")
+        else:
+            lines.append("  No new learnings. Run: learn_from_pros.py")
+
+        # ── Improvements (from self-analyze) ──
+        improvements = self.get_active_improvements()
+        high_priority = [i for i in improvements if i['priority'] == 'HIGH']
+        if high_priority:
+            lines.append("")
+            lines.append(f"  ISSUES ({len(high_priority)} high priority)")
+            lines.append(f"  {'─' * 52}")
+            for imp in high_priority[:3]:
+                lines.append(f"  [{imp['priority']}] {imp['finding'][:50]}")
+
+        # ── Footer ──
+        lines.append("")
+        lines.append(f"  {'─' * 52}")
+        lines.append(f"  Commands: report | flash | score | alerts | learn-from-pros")
+        lines.append(f"{'=' * 58}")
+        lines.append("")
+
+        return "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # Migration: import existing CSVs and data into DB
@@ -1869,6 +1996,9 @@ if __name__ == "__main__":
                 print(f"  Positions:   {risk['position_count']}")
                 if risk['over_concentrated']:
                     print(f"  Over-concentrated: {', '.join(c['ticker'] for c in risk['over_concentrated'])}")
+    elif len(sys.argv) > 1 and sys.argv[1] == "morning":
+        with VaultDB() as db:
+            print(db.morning_briefing())
     elif len(sys.argv) > 1 and sys.argv[1] == "consensus":
         with VaultDB() as db:
             print("\n=== Consensus Holdings ===\n")
@@ -1893,11 +2023,12 @@ if __name__ == "__main__":
         print("Vault Research Desk — Database")
         print()
         print("Commands:")
-        print("  python3 tools/db.py migrate      — Import existing CSV/JSON data")
-        print("  python3 tools/db.py export        — Dump tables to exports/ as CSV")
+        print("  python3 tools/db.py morning       — Morning briefing (full overview)")
         print("  python3 tools/db.py dashboard     — Portfolio overview")
         print("  python3 tools/db.py consensus     — Institutional consensus")
         print("  python3 tools/db.py smart-money TICKER — Smart money check")
+        print("  python3 tools/db.py export        — Dump tables to exports/ as CSV")
+        print("  python3 tools/db.py migrate       — Import existing CSV/JSON data")
         print()
         print(f"DB path: {DB_PATH}")
         if os.path.exists(DB_PATH):

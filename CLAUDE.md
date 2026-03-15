@@ -14,6 +14,7 @@ A personal investment research system with 4 analysis phases, adversarial valida
 - `sync [file]` → import IBKR CSV export into portfolio.md
 - `self-analyze` → system self-review: mistakes, patterns, improvements
 - `learn-from-pros` → fetch smart money data from 5 sources, cross-reference portfolio, save learnings to DB
+- `morning` → one-command briefing: portfolio, theses, watchlist, learnings, issues
 
 ## Project Structure
 ```
@@ -132,6 +133,7 @@ python3 tools/smart_money.py check GOOGL         # Full smart money check (all s
 
 ## Database
 ```bash
+python3 tools/db.py morning             # Morning briefing (portfolio + theses + watchlist + learnings)
 python3 tools/db.py dashboard            # Portfolio overview with live P&L
 python3 tools/db.py consensus            # Institutional consensus holdings
 python3 tools/db.py smart-money GOOGL    # Full smart money signal for a ticker

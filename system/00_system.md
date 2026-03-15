@@ -20,6 +20,7 @@ A personal investment research system. It produces weekly market reports with BU
 | `sync [file]` | Run tools/ibkr_sync.py — IBKR CSV import | Portfolio preview/update |
 | `self-analyze` | Run tools/self_analyze.py — system self-review | Results in vault.db |
 | `learn-from-pros` | Run tools/learn_from_pros.py — fetch smart money data, cross-reference portfolio, save learnings | Results in vault.db learnings table |
+| `morning` | Run tools/db.py morning — full overview: portfolio, theses, watchlist, learnings, issues | Summary in chat |
 
 ---
 
