@@ -117,6 +117,13 @@ def cmd_portfolio(args):
     if args and len(args) >= 1:
         action = args[0].lower()
 
+        # vault portfolio export
+        if action == 'export':
+            with VaultDB() as db:
+                count = db.export_portfolio_md()
+            print(f"  Exported {count} holdings to portfolio.md")
+            return
+
         # vault portfolio add TICKER SHARES COST [DATE]
         if action == 'add' and len(args) >= 4:
             ticker = args[1].upper()
@@ -153,9 +160,7 @@ def cmd_portfolio(args):
                     entry_price=cost, conviction='**', status='OPEN',
                 )
 
-            _update_portfolio_md()
             print(f"  Added: {ticker} — {shares} shares @ ${cost:.2f}")
-            print(f"  portfolio.md updated")
             return
 
         # vault portfolio remove TICKER
@@ -163,9 +168,7 @@ def cmd_portfolio(args):
             ticker = args[1].upper()
             with VaultDB() as db:
                 db.remove_holding(ticker)
-            _update_portfolio_md()
             print(f"  Removed: {ticker}")
-            print(f"  portfolio.md updated")
             return
 
         # vault portfolio update TICKER SHARES COST
@@ -185,17 +188,15 @@ def cmd_portfolio(args):
                 else:
                     print(f"  {ticker} not found. Use: vault portfolio add {ticker} SHARES COST")
                     return
-            _update_portfolio_md()
             print(f"  Updated: {ticker} — {shares} shares @ ${cost:.2f}")
-            print(f"  portfolio.md updated")
             return
 
         # vault portfolio cash AMOUNT
         if action == 'cash' and len(args) >= 2:
             amount = float(args[1].replace('$', '').replace(',', ''))
-            _update_portfolio_cash(amount)
+            with VaultDB() as db:
+                db.set_cash(amount)
             print(f"  Cash updated: ${amount:,.2f}")
-            print(f"  portfolio.md updated")
             return
 
     # Default: show portfolio
@@ -229,18 +230,9 @@ def cmd_portfolio(args):
     pnl_pct = pnl_total / total_cost * 100 if total_cost else 0
     print(f"  {'Total':<7} {'':>8} ${total_cost:>6.0f} {'':>8} ${total_value:>9.2f} {pnl_pct:>+6.1f}%")
 
-    # Cash
-    portfolio_path = os.path.join(PROJECT_ROOT, "portfolio.md")
-    cash = 0
-    try:
-        with open(portfolio_path) as f:
-            for line in f:
-                if 'Cash available' in line:
-                    parts = line.split(':')
-                    if len(parts) > 1:
-                        cash = float(parts[1].strip().replace('$', '').replace(',', ''))
-    except Exception:
-        pass
+    # Cash from DB
+    with VaultDB() as db:
+        cash = db.get_cash()
 
     print(f"  {'Cash':<7} {'':>8} {'':>8} {'':>8} ${cash:>9.2f}")
     print(f"  {'─' * 60}")
@@ -256,84 +248,10 @@ def cmd_portfolio(args):
     print("    vault portfolio update GOOGL 1.5 305")
     print("    vault portfolio remove CFG")
     print("    vault portfolio cash 900")
+    print("    vault portfolio export    (regenerate portfolio.md from DB)")
     print(f"{'=' * 65}")
     print()
 
-
-def _update_portfolio_md():
-    """Rewrite portfolio.md from DB holdings, preserving settings/profile/notes."""
-    sys.path.insert(0, SCRIPT_DIR)
-    from db import VaultDB
-
-    portfolio_path = os.path.join(PROJECT_ROOT, "portfolio.md")
-
-    # Read existing file and extract sections
-    sections = {'settings': [], 'profile': [], 'notes': []}
-    current_section = None
-
-    try:
-        with open(portfolio_path) as f:
-            for line in f:
-                stripped = line.strip()
-                if stripped.startswith('## Settings'):
-                    current_section = 'settings'
-                elif stripped.startswith('## Profile'):
-                    current_section = 'profile'
-                elif stripped.startswith('## Notes'):
-                    current_section = 'notes'
-                elif stripped.startswith('## Holdings'):
-                    current_section = 'holdings'
-
-                if current_section in sections:
-                    sections[current_section].append(line)
-    except FileNotFoundError:
-        sections['settings'] = ["## Settings\n", "Risk tolerance: moderate\n",
-                                "Monthly investment: $4,500\n", "Cash available: $0\n", "\n"]
-        sections['profile'] = ["## Profile\n", "Name: Pavlo\n", "\n"]
-        sections['notes'] = ["## Notes\n", "- This file is the ONLY source of truth for what I own\n",
-                             "- Claude cannot edit this file unless I explicitly ask\n"]
-
-    with VaultDB() as db:
-        holdings = db.get_holdings()
-
-    # Rebuild file: holdings first, then preserved sections
-    lines = []
-    lines.append("## Holdings\n")
-    lines.append("| Ticker | Shares | Avg Cost | Date Bought |\n")
-    lines.append("|--------|--------|----------|-------------|\n")
-    for h in holdings:
-        date_str = h['date_bought'] or ''
-        lines.append(f"| {h['ticker']}  | {h['shares']:.4f} | ${h['cost_basis']:.0f}     | {date_str}  |\n")
-    lines.append("\n")
-
-    for key in ['settings', 'profile', 'notes']:
-        if sections[key]:
-            lines.extend(sections[key])
-            if not sections[key][-1].endswith('\n'):
-                lines.append('\n')
-
-    with open(portfolio_path, 'w') as f:
-        f.writelines(lines)
-
-
-def _update_portfolio_cash(amount):
-    """Update cash available in portfolio.md."""
-    portfolio_path = os.path.join(PROJECT_ROOT, "portfolio.md")
-    try:
-        with open(portfolio_path) as f:
-            content = f.read()
-
-        import re
-        content = re.sub(
-            r'Cash available:.*',
-            f'Cash available: ${amount:,.0f}',
-            content
-        )
-
-        with open(portfolio_path, 'w') as f:
-            f.write(content)
-    except Exception as e:
-        print(f"  Error updating cash: {e}")
 
 
 def cmd_health():

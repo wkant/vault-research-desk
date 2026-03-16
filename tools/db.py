@@ -381,6 +381,13 @@ CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_institutional_ticker ON institutional(ticker);
 CREATE INDEX IF NOT EXISTS idx_consensus_ticker ON consensus(ticker);
 
+-- Portfolio settings (DB-first, exported to portfolio.md)
+CREATE TABLE IF NOT EXISTS settings (
+    key          TEXT PRIMARY KEY,
+    value        TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
 -- Scorecard snapshots (track system performance over time)
 CREATE TABLE IF NOT EXISTS scorecards (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -454,59 +461,134 @@ class VaultDB:
         self.conn.execute("DELETE FROM holdings WHERE ticker=?", (ticker,))
         self.conn.commit()
 
+    # Sector map for auto-detection
+    SECTOR_MAP = {
+        "XLK": "Technology", "XLC": "Communication", "XLV": "Healthcare",
+        "XLE": "Energy", "XLF": "Financials", "XLY": "Cons Discretionary",
+        "XLP": "Cons Staples", "XLI": "Industrials", "XLB": "Materials",
+        "XLRE": "Real Estate", "XLU": "Utilities", "GLD": "Commodities",
+        "SLV": "Commodities", "VOO": "Broad Market", "SPY": "Broad Market",
+        "QQQ": "Technology", "IWM": "Broad Market",
+        "GOOGL": "Technology", "GOOG": "Technology", "AAPL": "Technology",
+        "MSFT": "Technology", "AMZN": "Cons Discretionary", "META": "Technology",
+        "NVDA": "Technology", "TSLA": "Cons Discretionary", "NFLX": "Communication",
+        "XOM": "Energy", "CVX": "Energy", "LMT": "Industrials",
+        "JPM": "Financials", "BAC": "Financials", "CFG": "Financials",
+        "JNJ": "Healthcare", "UNH": "Healthcare", "PFE": "Healthcare",
+    }
+
+    ETFS = {"XLE", "XLV", "XLK", "XLF", "XLY", "XLP", "XLI", "XLB",
+            "XLRE", "XLU", "XLC", "GLD", "SLV", "VOO", "SPY", "QQQ", "IWM"}
+
+    def get_sector(self, ticker):
+        """Get sector for a ticker."""
+        return self.SECTOR_MAP.get(ticker)
+
+    # ------------------------------------------------------------------
+    # Settings (DB-first)
+    # ------------------------------------------------------------------
+    def get_setting(self, key, default=None):
+        row = self.conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row['value'] if row else default
+
+    def set_setting(self, key, value):
+        self.conn.execute("""
+            INSERT INTO settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+        """, (key, str(value), datetime.now().isoformat()))
+        self.conn.commit()
+
+    def get_all_settings(self):
+        rows = self.conn.execute("SELECT key, value FROM settings ORDER BY key").fetchall()
+        return {r['key']: r['value'] for r in rows}
+
+    def get_cash(self):
+        return float(self.get_setting('cash_available', '0'))
+
+    def set_cash(self, amount):
+        self.set_setting('cash_available', str(amount))
+
+    # ------------------------------------------------------------------
+    # Portfolio sync (DB is master → portfolio.md is export)
+    # ------------------------------------------------------------------
     def sync_holdings_from_portfolio(self):
-        """Read portfolio.md and sync holdings into DB."""
+        """One-time import: read portfolio.md into DB. After this, DB is master."""
         import sys
         sys.path.insert(0, SCRIPT_DIR)
         from data_fetcher import read_portfolio
         tickers, holdings, settings = read_portfolio()
 
-        etfs = {"XLE", "XLV", "XLK", "XLF", "XLY", "XLP", "XLI", "XLB",
-                "XLRE", "XLU", "XLC", "GLD", "SLV", "VOO", "SPY", "QQQ", "IWM"}
-
-        # Sector mapping for common tickers and ETFs
-        sector_map = {
-            "XLK": "Technology", "XLC": "Communication", "XLV": "Healthcare",
-            "XLE": "Energy", "XLF": "Financials", "XLY": "Cons Discretionary",
-            "XLP": "Cons Staples", "XLI": "Industrials", "XLB": "Materials",
-            "XLRE": "Real Estate", "XLU": "Utilities", "GLD": "Commodities",
-            "SLV": "Commodities", "VOO": "Broad Market", "SPY": "Broad Market",
-            "QQQ": "Technology", "IWM": "Broad Market",
-            # Common individual stocks
-            "GOOGL": "Technology", "GOOG": "Technology", "AAPL": "Technology",
-            "MSFT": "Technology", "AMZN": "Cons Discretionary", "META": "Technology",
-            "NVDA": "Technology", "TSLA": "Cons Discretionary", "NFLX": "Communication",
-            "XOM": "Energy", "CVX": "Energy", "LMT": "Industrials",
-            "JPM": "Financials", "BAC": "Financials", "CFG": "Financials",
-            "JNJ": "Healthcare", "UNH": "Healthcare", "PFE": "Healthcare",
-        }
-
         for ticker in tickers:
             h = holdings.get(ticker, {})
-            sector = sector_map.get(ticker)
-            # Try yfinance for unknown sectors (only on sync, not hot path)
-            if not sector and ticker not in etfs:
-                try:
-                    import yfinance as yf
-                    info = yf.Ticker(ticker).info
-                    sector = info.get("sector")
-                except Exception:
-                    pass
+            sector = self.SECTOR_MAP.get(ticker)
             self.upsert_holding(
                 ticker=ticker,
                 shares=h.get("shares", 0),
                 cost_basis=h.get("cost", 0),
                 date_bought=h.get("date"),
                 sector=sector,
-                asset_type="etf" if ticker in etfs else "stock"
+                asset_type="etf" if ticker in self.ETFS else "stock"
             )
 
-        # Remove holdings no longer in portfolio.md
-        db_tickers = {r["ticker"] for r in self.get_holdings()}
-        for old in db_tickers - set(tickers):
-            self.remove_holding(old)
+        # Sync settings
+        setting_map = {
+            'risk_tolerance': settings.get('risk_tolerance', 'moderate'),
+            'monthly_investment': settings.get('monthly_investment', '4500'),
+            'cash_available': settings.get('cash_available', '0'),
+            'name': settings.get('name', ''),
+            'location': settings.get('location', ''),
+            'broker': settings.get('broker', ''),
+            'experience': settings.get('experience', ''),
+            'preference': settings.get('preference', ''),
+            'start_date': settings.get('start_date', ''),
+        }
+        for k, v in setting_map.items():
+            if v:
+                self.set_setting(k, v)
 
         return len(tickers)
+
+    def export_portfolio_md(self):
+        """Export DB holdings + settings to portfolio.md (DB → file)."""
+        holdings = self.get_holdings()
+        settings = self.get_all_settings()
+
+        lines = []
+        lines.append("## Holdings\n")
+        lines.append("| Ticker | Shares | Avg Cost | Date Bought |\n")
+        lines.append("|--------|--------|----------|-------------|\n")
+        for h in holdings:
+            date_str = h['date_bought'] or ''
+            lines.append(f"| {h['ticker']}  | {h['shares']:.4f} | ${h['cost_basis']:.0f}     | {date_str}  |\n")
+        lines.append("\n")
+
+        lines.append("## Settings\n")
+        lines.append(f"Risk tolerance: {settings.get('risk_tolerance', 'moderate')}\n")
+        lines.append(f"Monthly investment: ${float(settings.get('monthly_investment', 4500)):,.0f}\n")
+        lines.append(f"Cash available: ${float(settings.get('cash_available', 0)):,.0f}\n")
+        lines.append("\n")
+
+        lines.append("## Profile\n")
+        for key in ['name', 'location', 'broker', 'experience', 'preference', 'start_date']:
+            val = settings.get(key, '')
+            if val:
+                label = key.replace('_', ' ').title()
+                if key == 'start_date':
+                    label = 'Start date'
+                lines.append(f"{label}: {val}\n")
+        lines.append("\n")
+
+        lines.append("## Notes\n")
+        lines.append("- This file is auto-generated from vault.db\n")
+        lines.append("- To update: tell Claude or use `vault portfolio` commands\n")
+        lines.append("- DB is the source of truth, this file is an export\n")
+
+        filepath = os.path.join(PROJECT_ROOT, "portfolio.md")
+        with open(filepath, 'w') as f:
+            f.writelines(lines)
+
+        return len(holdings)
 
     # ------------------------------------------------------------------
     # Trades (performance log)
