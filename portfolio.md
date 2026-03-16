@@ -9,7 +9,7 @@
 ## Settings
 Risk tolerance: moderate
 Monthly investment: $4,500
-Cash available: $0
+Cash available: $4,500
 
 ## Profile
 Name: Pavlo

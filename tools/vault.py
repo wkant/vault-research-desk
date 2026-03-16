@@ -30,6 +30,32 @@ PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..")
 PYTHON = sys.executable
 
 
+def _market_status():
+    """Check if US market is open, pre-market, or closed."""
+    from datetime import datetime, timezone, timedelta
+    # US Eastern Time (approximate — no pytz dependency)
+    utc_now = datetime.now(timezone.utc)
+    et_offset = timedelta(hours=-4)  # EDT (March = DST)
+    et_now = utc_now + et_offset
+
+    weekday = et_now.weekday()  # 0=Mon, 6=Sun
+    hour = et_now.hour
+    minute = et_now.minute
+
+    if weekday >= 5:
+        return "CLOSED", f"Weekend (ET: {et_now.strftime('%a %H:%M')}). Prices are Friday's close."
+    elif hour < 4:
+        return "CLOSED", f"After hours (ET: {et_now.strftime('%H:%M')}). Prices are yesterday's close."
+    elif hour < 9 or (hour == 9 and minute < 30):
+        return "PRE-MARKET", f"Pre-market (ET: {et_now.strftime('%H:%M')}). Futures trading, stocks not yet open."
+    elif hour < 16:
+        return "OPEN", f"Market open (ET: {et_now.strftime('%H:%M')}). Live prices."
+    elif hour < 20:
+        return "AFTER-HOURS", f"After hours (ET: {et_now.strftime('%H:%M')}). Limited trading."
+    else:
+        return "CLOSED", f"Market closed (ET: {et_now.strftime('%H:%M')}). Prices are today's close."
+
+
 def run_tool(script, args=None, timeout=300):
     """Run a tool script and stream output."""
     cmd = [PYTHON, os.path.join(SCRIPT_DIR, script)]
@@ -50,8 +76,29 @@ def cmd_morning():
     """Morning briefing."""
     sys.path.insert(0, SCRIPT_DIR)
     from db import VaultDB
+    status, msg = _market_status()
     with VaultDB() as db:
         print(db.morning_briefing())
+    if status != "OPEN":
+        print(f"  ** {msg}")
+        print()
+
+
+def cmd_status(args):
+    """One-line portfolio status."""
+    sys.path.insert(0, SCRIPT_DIR)
+    from db import VaultDB
+    status, msg = _market_status()
+    with VaultDB() as db:
+        risk = db.risk_dashboard()
+        regime = db.detect_regime()
+    if not risk:
+        print("No portfolio data.")
+        return
+    pnl = (risk['total_value'] - risk['total_cost']) / risk['total_cost'] * 100 if risk['total_cost'] else 0
+    regime_str = regime['regime'] if regime['regime'] != 'UNKNOWN' else '?'
+    bench = f" | alpha {risk.get('alpha', 0):+.1f}%" if risk.get('alpha') else ""
+    print(f"  ${risk['total_value']:,.2f} ({pnl:+.1f}%) | {risk['position_count']} positions | {regime_str}{bench} | {status}")
 
 
 def cmd_changes():
@@ -199,6 +246,10 @@ def cmd_portfolio(args):
     print(f"  {'─' * 60}")
     print(f"  {'TOTAL':<7} {'':>8} {'':>8} {'':>8} ${total_value + cash:>9.2f}")
 
+    status, msg = _market_status()
+    if status != "OPEN":
+        print(f"\n  ** {msg}")
+
     print()
     print("  Quick commands:")
     print("    vault portfolio add XOM 5 156.12 2026-03-18")
@@ -210,56 +261,56 @@ def cmd_portfolio(args):
 
 
 def _update_portfolio_md():
-    """Rewrite portfolio.md from DB holdings."""
+    """Rewrite portfolio.md from DB holdings, preserving settings/profile/notes."""
     sys.path.insert(0, SCRIPT_DIR)
     from db import VaultDB
 
     portfolio_path = os.path.join(PROJECT_ROOT, "portfolio.md")
 
-    # Read existing settings/profile sections
-    settings_lines = []
-    profile_lines = []
-    notes_lines = []
+    # Read existing file and extract sections
+    sections = {'settings': [], 'profile': [], 'notes': []}
     current_section = None
 
     try:
         with open(portfolio_path) as f:
             for line in f:
-                if line.strip().startswith('## Settings'):
+                stripped = line.strip()
+                if stripped.startswith('## Settings'):
                     current_section = 'settings'
-                elif line.strip().startswith('## Profile'):
+                elif stripped.startswith('## Profile'):
                     current_section = 'profile'
-                elif line.strip().startswith('## Notes'):
+                elif stripped.startswith('## Notes'):
                     current_section = 'notes'
-                elif line.strip().startswith('## Holdings'):
+                elif stripped.startswith('## Holdings'):
                     current_section = 'holdings'
 
-                if current_section == 'settings':
-                    settings_lines.append(line)
-                elif current_section == 'profile':
-                    profile_lines.append(line)
-                elif current_section == 'notes':
-                    notes_lines.append(line)
+                if current_section in sections:
+                    sections[current_section].append(line)
     except FileNotFoundError:
-        settings_lines = ["## Settings\nRisk tolerance: moderate\nMonthly investment: $4,500\nCash available: $0\n\n"]
-        profile_lines = ["## Profile\nName: Pavlo\n\n"]
-        notes_lines = ["## Notes\n- This file is the ONLY source of truth for what I own\n"]
+        sections['settings'] = ["## Settings\n", "Risk tolerance: moderate\n",
+                                "Monthly investment: $4,500\n", "Cash available: $0\n", "\n"]
+        sections['profile'] = ["## Profile\n", "Name: Pavlo\n", "\n"]
+        sections['notes'] = ["## Notes\n", "- This file is the ONLY source of truth for what I own\n",
+                             "- Claude cannot edit this file unless I explicitly ask\n"]
 
     with VaultDB() as db:
         holdings = db.get_holdings()
 
-    # Rebuild file
+    # Rebuild file: holdings first, then preserved sections
     lines = []
     lines.append("## Holdings\n")
     lines.append("| Ticker | Shares | Avg Cost | Date Bought |\n")
     lines.append("|--------|--------|----------|-------------|\n")
     for h in holdings:
         date_str = h['date_bought'] or ''
-        lines.append(f"| {h['ticker']}  | {h['shares']} | ${h['cost_basis']:.0f}     | {date_str}  |\n")
+        lines.append(f"| {h['ticker']}  | {h['shares']:.4f} | ${h['cost_basis']:.0f}     | {date_str}  |\n")
     lines.append("\n")
 
-    for section in [settings_lines, profile_lines, notes_lines]:
-        lines.extend(section)
+    for key in ['settings', 'profile', 'notes']:
+        if sections[key]:
+            lines.extend(sections[key])
+            if not sections[key][-1].endswith('\n'):
+                lines.append('\n')
 
     with open(portfolio_path, 'w') as f:
         f.writelines(lines)
@@ -627,12 +678,15 @@ def cmd_validate(args):
     blockers = []
 
     with VaultDB() as db:
-        # 1. Data freshness
+        # 1. Data freshness (weekend-aware)
         latest = db.conn.execute("SELECT max(fetched_at) as l FROM price_cache").fetchone()
         if latest and latest['l']:
             from datetime import datetime as dt
             age_h = (dt.now() - dt.fromisoformat(latest['l'])).total_seconds() / 3600
-            if age_h > 24:
+            mkt_status, _ = _market_status()
+            # On weekends/closed, allow up to 72h (Friday close → Monday morning)
+            stale_threshold = 72 if mkt_status in ("CLOSED",) and dt.now().weekday() in (5, 6, 0) else 24
+            if age_h > stale_threshold:
                 blockers.append(f"Price data is {age_h:.0f}h stale — run `vault fetch` first")
             else:
                 checks.append(f"Price data: {age_h:.0f}h old")
@@ -1314,16 +1368,47 @@ def cmd_flow_buy(args):
         except ValueError:
             pass
 
+    # Look up conviction from watchlist/theses
+    sys.path.insert(0, SCRIPT_DIR)
+    from db import VaultDB
+    conviction = '**'
+    with VaultDB() as db:
+        wl = db.conn.execute("""
+            SELECT conviction FROM watchlist
+            WHERE ticker=? AND status='ACTIVE'
+            ORDER BY date DESC LIMIT 1
+        """, (ticker,)).fetchone()
+        if wl and wl['conviction']:
+            conviction = wl['conviction']
+        else:
+            thesis = db.conn.execute("""
+                SELECT conviction FROM theses
+                WHERE ticker=? AND status='ACTIVE'
+                ORDER BY date_opened DESC LIMIT 1
+            """, (ticker,)).fetchone()
+            if thesis and thesis['conviction']:
+                conviction = thesis['conviction']
+
+    # Check market status
+    status, msg = _market_status()
+
     print()
     print(f"{'=' * 55}")
     print(f"  PRE-TRADE FLOW — {ticker}")
+    if conviction != '**':
+        print(f"  Conviction from report: {conviction}")
+    if status != "OPEN":
+        print(f"  ** {msg}")
     print(f"{'=' * 55}")
     print()
 
-    # 1. Position sizing
+    # 1. Position sizing (with conviction from report)
     print("  STEP 1/4: Position Sizing")
     print(f"  {'─' * 50}")
-    cmd_size(args)
+    size_args = [ticker, conviction]
+    if amount:
+        size_args.extend(['--entry', str(amount)])
+    cmd_size(size_args)
 
     # 2. Simulate
     if amount:
@@ -1361,8 +1446,13 @@ def cmd_flow_post_trade(args):
         return
 
     ticker = args[0].upper()
-    price = args[1]
-    shares = args[2]
+    try:
+        price = str(float(args[1].replace('$', '')))
+        shares = str(float(args[2]))
+    except ValueError:
+        print(f"  Error: price and shares must be numbers")
+        print(f"  Example: vault post-trade XOM 156.12 5")
+        return
 
     print()
     print(f"{'=' * 55}")
@@ -1650,6 +1740,7 @@ def cmd_help():
 
 COMMANDS = {
     "morning":     lambda args: cmd_morning(),
+    "status":      lambda args: cmd_status(args),
     "changes":     lambda args: cmd_changes(),
     "portfolio":   lambda args: cmd_portfolio(args),
     "p":           lambda args: cmd_portfolio(args),

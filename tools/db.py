@@ -2311,7 +2311,7 @@ class VaultDB:
             entry_price=price,
             conviction=wl['conviction'] if wl else '**',
             status='OPEN',
-            notes=f"Converted from watchlist (rec'd ${wl['price_at_rec']:.2f})" if wl else "Manual entry",
+            notes=f"Converted from watchlist (rec'd ${wl['price_at_rec']:.2f})" if wl and wl['price_at_rec'] else "Manual entry",
         )
         self.conn.commit()
 
@@ -2320,7 +2320,7 @@ class VaultDB:
             'price': price,
             'shares': shares,
             'from_watchlist': bool(wl),
-            'rec_price': wl['price_at_rec'] if wl else None,
+            'rec_price': wl['price_at_rec'] if wl and wl['price_at_rec'] else None,
         }
 
     # ------------------------------------------------------------------
@@ -2748,9 +2748,9 @@ class VaultDB:
         bench = self.conn.execute(
             "SELECT * FROM benchmarks ORDER BY date DESC LIMIT 1"
         ).fetchone()
-        if bench:
+        if bench and bench['portfolio_pct'] is not None:
             lines.append(f"Portfolio since inception: {bench['portfolio_pct']:+.2f}%")
-            lines.append(f"VOO over same period: {bench['voo_pct']:+.2f}%")
+            lines.append(f"VOO over same period: {bench['voo_pct'] or 0:+.2f}%")
             lines.append("")
 
         # Regime
