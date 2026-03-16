@@ -62,6 +62,229 @@ def cmd_changes():
         print(db.changes_since_last_report())
 
 
+def cmd_portfolio(args):
+    """Portfolio view + quick update commands."""
+    sys.path.insert(0, SCRIPT_DIR)
+    from db import VaultDB
+
+    if args and len(args) >= 1:
+        action = args[0].lower()
+
+        # vault portfolio add TICKER SHARES COST [DATE]
+        if action == 'add' and len(args) >= 4:
+            ticker = args[1].upper()
+            shares = float(args[2])
+            cost = float(args[3].replace('$', ''))
+            date_bought = args[4] if len(args) > 4 else None
+
+            etfs = {"XLE", "XLV", "XLK", "XLF", "XLY", "XLP", "XLI", "XLB",
+                    "XLRE", "XLU", "XLC", "GLD", "SLV", "VOO", "SPY", "QQQ", "IWM"}
+            sector_map = {
+                "XLK": "Technology", "XLC": "Communication", "XLV": "Healthcare",
+                "XLE": "Energy", "XLF": "Financials", "XLY": "Cons Discretionary",
+                "XLP": "Cons Staples", "XLI": "Industrials", "XLB": "Materials",
+                "XLRE": "Real Estate", "XLU": "Utilities", "GLD": "Commodities",
+                "VOO": "Broad Market", "SPY": "Broad Market", "QQQ": "Technology",
+                "GOOGL": "Technology", "GOOG": "Technology", "AAPL": "Technology",
+                "MSFT": "Technology", "AMZN": "Cons Discretionary", "META": "Technology",
+                "NVDA": "Technology", "XOM": "Energy", "CVX": "Energy",
+                "LMT": "Industrials", "JPM": "Financials", "CFG": "Financials",
+            }
+            sector = sector_map.get(ticker)
+
+            with VaultDB() as db:
+                db.upsert_holding(
+                    ticker=ticker, shares=shares, cost_basis=cost,
+                    date_bought=date_bought, sector=sector,
+                    asset_type="etf" if ticker in etfs else "stock"
+                )
+                # Also log as trade
+                from datetime import date as d
+                db.add_trade(
+                    date=date_bought or d.today().isoformat(),
+                    ticker=ticker, action='BUY',
+                    entry_price=cost, conviction='**', status='OPEN',
+                )
+
+            _update_portfolio_md()
+            print(f"  Added: {ticker} — {shares} shares @ ${cost:.2f}")
+            print(f"  portfolio.md updated")
+            return
+
+        # vault portfolio remove TICKER
+        if action == 'remove' and len(args) >= 2:
+            ticker = args[1].upper()
+            with VaultDB() as db:
+                db.remove_holding(ticker)
+            _update_portfolio_md()
+            print(f"  Removed: {ticker}")
+            print(f"  portfolio.md updated")
+            return
+
+        # vault portfolio update TICKER SHARES COST
+        if action == 'update' and len(args) >= 4:
+            ticker = args[1].upper()
+            shares = float(args[2])
+            cost = float(args[3].replace('$', ''))
+            with VaultDB() as db:
+                existing = db.get_holding(ticker)
+                if existing:
+                    db.upsert_holding(
+                        ticker=ticker, shares=shares, cost_basis=cost,
+                        date_bought=existing['date_bought'],
+                        sector=existing['sector'],
+                        asset_type=existing['asset_type']
+                    )
+                else:
+                    print(f"  {ticker} not found. Use: vault portfolio add {ticker} SHARES COST")
+                    return
+            _update_portfolio_md()
+            print(f"  Updated: {ticker} — {shares} shares @ ${cost:.2f}")
+            print(f"  portfolio.md updated")
+            return
+
+        # vault portfolio cash AMOUNT
+        if action == 'cash' and len(args) >= 2:
+            amount = float(args[1].replace('$', '').replace(',', ''))
+            _update_portfolio_cash(amount)
+            print(f"  Cash updated: ${amount:,.2f}")
+            print(f"  portfolio.md updated")
+            return
+
+    # Default: show portfolio
+    with VaultDB() as db:
+        dashboard = db.portfolio_dashboard()
+        risk = db.risk_dashboard()
+
+    if not dashboard:
+        print("No holdings. Use: vault portfolio add TICKER SHARES COST")
+        return
+
+    total_value = risk['total_value'] if risk else 0
+    total_cost = risk['total_cost'] if risk else 0
+
+    print()
+    print(f"{'=' * 65}")
+    print(f"  PORTFOLIO")
+    print(f"{'=' * 65}")
+    print(f"  {'Ticker':<7} {'Shares':>8} {'Cost':>8} {'Price':>8} {'Value':>10} {'P&L':>8} {'Alloc':>6}")
+    print(f"  {'─' * 60}")
+
+    for h in dashboard:
+        price = h['current_price'] or 0
+        value = h['market_value'] or 0
+        pnl = f"{h['pnl_pct']:+.1f}%" if h['pnl_pct'] else "n/a"
+        alloc = value / total_value * 100 if total_value else 0
+        print(f"  {h['ticker']:<7} {h['shares']:>8.4f} ${h['cost_basis']:>6.0f} ${price:>6.2f} ${value:>9.2f} {pnl:>7} {alloc:>5.1f}%")
+
+    print(f"  {'─' * 60}")
+    pnl_total = total_value - total_cost
+    pnl_pct = pnl_total / total_cost * 100 if total_cost else 0
+    print(f"  {'Total':<7} {'':>8} ${total_cost:>6.0f} {'':>8} ${total_value:>9.2f} {pnl_pct:>+6.1f}%")
+
+    # Cash
+    portfolio_path = os.path.join(PROJECT_ROOT, "portfolio.md")
+    cash = 0
+    try:
+        with open(portfolio_path) as f:
+            for line in f:
+                if 'Cash available' in line:
+                    parts = line.split(':')
+                    if len(parts) > 1:
+                        cash = float(parts[1].strip().replace('$', '').replace(',', ''))
+    except Exception:
+        pass
+
+    print(f"  {'Cash':<7} {'':>8} {'':>8} {'':>8} ${cash:>9.2f}")
+    print(f"  {'─' * 60}")
+    print(f"  {'TOTAL':<7} {'':>8} {'':>8} {'':>8} ${total_value + cash:>9.2f}")
+
+    print()
+    print("  Quick commands:")
+    print("    vault portfolio add XOM 5 156.12 2026-03-18")
+    print("    vault portfolio update GOOGL 1.5 305")
+    print("    vault portfolio remove CFG")
+    print("    vault portfolio cash 900")
+    print(f"{'=' * 65}")
+    print()
+
+
+def _update_portfolio_md():
+    """Rewrite portfolio.md from DB holdings."""
+    sys.path.insert(0, SCRIPT_DIR)
+    from db import VaultDB
+
+    portfolio_path = os.path.join(PROJECT_ROOT, "portfolio.md")
+
+    # Read existing settings/profile sections
+    settings_lines = []
+    profile_lines = []
+    notes_lines = []
+    current_section = None
+
+    try:
+        with open(portfolio_path) as f:
+            for line in f:
+                if line.strip().startswith('## Settings'):
+                    current_section = 'settings'
+                elif line.strip().startswith('## Profile'):
+                    current_section = 'profile'
+                elif line.strip().startswith('## Notes'):
+                    current_section = 'notes'
+                elif line.strip().startswith('## Holdings'):
+                    current_section = 'holdings'
+
+                if current_section == 'settings':
+                    settings_lines.append(line)
+                elif current_section == 'profile':
+                    profile_lines.append(line)
+                elif current_section == 'notes':
+                    notes_lines.append(line)
+    except FileNotFoundError:
+        settings_lines = ["## Settings\nRisk tolerance: moderate\nMonthly investment: $4,500\nCash available: $0\n\n"]
+        profile_lines = ["## Profile\nName: Pavlo\n\n"]
+        notes_lines = ["## Notes\n- This file is the ONLY source of truth for what I own\n"]
+
+    with VaultDB() as db:
+        holdings = db.get_holdings()
+
+    # Rebuild file
+    lines = []
+    lines.append("## Holdings\n")
+    lines.append("| Ticker | Shares | Avg Cost | Date Bought |\n")
+    lines.append("|--------|--------|----------|-------------|\n")
+    for h in holdings:
+        date_str = h['date_bought'] or ''
+        lines.append(f"| {h['ticker']}  | {h['shares']} | ${h['cost_basis']:.0f}     | {date_str}  |\n")
+    lines.append("\n")
+
+    for section in [settings_lines, profile_lines, notes_lines]:
+        lines.extend(section)
+
+    with open(portfolio_path, 'w') as f:
+        f.writelines(lines)
+
+
+def _update_portfolio_cash(amount):
+    """Update cash available in portfolio.md."""
+    portfolio_path = os.path.join(PROJECT_ROOT, "portfolio.md")
+    try:
+        with open(portfolio_path) as f:
+            content = f.read()
+
+        import re
+        content = re.sub(
+            r'Cash available:.*',
+            f'Cash available: ${amount:,.0f}',
+            content
+        )
+
+        with open(portfolio_path, 'w') as f:
+            f.write(content)
+    except Exception as e:
+        print(f"  Error updating cash: {e}")
+
+
 def cmd_health():
     """System health check — validates everything is working."""
     sys.path.insert(0, SCRIPT_DIR)
@@ -1428,6 +1651,8 @@ def cmd_help():
 COMMANDS = {
     "morning":     lambda args: cmd_morning(),
     "changes":     lambda args: cmd_changes(),
+    "portfolio":   lambda args: cmd_portfolio(args),
+    "p":           lambda args: cmd_portfolio(args),
     "score":       lambda args: run_tool("scorer.py"),
     "alerts":      lambda args: run_tool("alerts.py", args),
     "screen":      lambda args: run_tool("screener.py", args),
