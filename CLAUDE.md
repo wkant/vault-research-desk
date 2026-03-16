@@ -120,7 +120,7 @@ vault_research_desk/
 │       ├── base.html
 │       └── styles.css
 │
-├── vault.db                   ← SQLite (20 tables, 19 indices)
+├── vault.db                   ← SQLite (21 tables, 21 indices) — SOURCE OF TRUTH for portfolio
 ├── notes/                     ← Action plans (FOMC plan, trade plans)
 ├── reports/                   ← Generated reports (MD + HTML)
 └── trades/                    ← Trade records
@@ -128,14 +128,15 @@ vault_research_desk/
 
 ## Key Files (read in this order)
 1. `system/00_system.md` — Master rules, execution flow, sizing priority hierarchy
-2. `portfolio.md` — **SINGLE SOURCE OF TRUTH** for all investor data
+2. `vault.db` (via `vault portfolio`) — **SOURCE OF TRUTH** for holdings, settings, cash
 3. `system/01_research.md` → `02_strategy.md` → `03_devils_gate.md` → `04_report.md`
 4. `system/05_position_mgmt.md` — Scaling, stops, profit-taking rules
 5. `tools/data_fetcher.py` — Run before every report for real market data
+6. `portfolio.md` — Auto-generated export from DB (`vault portfolio export`)
 
 ## Critical Rules
-- **portfolio.md is the ONLY source of truth.** DB syncs from it. No hardcoded values.
-- **Portfolio updates go through DB first:** `vault portfolio add/update/remove/cash` auto-syncs portfolio.md.
+- **vault.db is the source of truth for portfolio.** portfolio.md is an auto-generated export (`vault portfolio export`).
+- **Portfolio updates go through DB:** `vault portfolio add/update/remove/cash`. Never edit portfolio.md manually.
 - **Never fabricate data.** If you can't verify it, say "not available."
 - **Run `vault preflight` before reports.** Collects all data + refreshes auto-patches.
 - **Every phase posts output in chat.** If it's not visible, it didn't happen.
@@ -149,12 +150,16 @@ vault_research_desk/
 - **Sizing priority:** Hard limits → Circuit breaker → Conviction → Risk tolerance → Core/Satellite → Kelly.
 
 ## Portfolio Update Workflow
-Pavlo sends screenshots or trade confirmations. Claude updates:
+Pavlo sends screenshots or trade confirmations. Claude updates DB directly:
 ```bash
-vault portfolio add XOM 5 156.12 2026-03-18   # Adds to DB + portfolio.md + logs trade
-vault portfolio cash 900                        # Updates cash in both places
+vault portfolio add XOM 5 156.12 2026-03-18   # Adds to DB + logs trade
+vault portfolio update GOOGL 1.5 305           # Update existing position
+vault portfolio remove CFG                      # Remove position
+vault portfolio cash 900                        # Update cash available
+vault portfolio export                          # Regenerate portfolio.md from DB (if needed)
+vault p                                         # Quick view (alias)
 ```
-No manual file editing needed.
+DB is master. portfolio.md is export only. No manual file editing.
 
 ## API Keys (set in ~/.zshrc)
 ```bash
@@ -172,7 +177,7 @@ All portfolio/morning/buy-flow commands show market status:
 Weekend staleness threshold: 72h (Friday close → Monday morning is OK).
 
 ## Database (vault.db)
-20 tables, 19 performance indices. Key methods:
+21 tables (including settings), 21 performance indices. Auto-cleanup runs on every morning briefing (marks stale learnings consumed, deduplicates improvements). Key methods:
 ```python
 from db import VaultDB
 with VaultDB() as db:
@@ -208,10 +213,14 @@ Embedded in system files as AUTO-FIX and PRO-INSIGHT patches:
 Patches auto-refresh during `vault preflight` (runs self_analyze.py).
 
 ## Don't
-- Don't hardcode investor data in system files — read from portfolio.md
+- Don't hardcode investor data in system files — read from DB via `vault portfolio`
 - Don't fabricate sentiment indicators you can't verify
 - Don't claim to see chart patterns — use computed technicals from data_fetcher.py
 - Don't skip Devil's Gate to save time
 - Don't assume the investor bought something because a previous report recommended it
-- Don't modify portfolio.md manually — use `vault portfolio` commands
+- Don't modify portfolio.md manually — use `vault portfolio` commands (DB is master)
 - Don't trust screener output blindly — it flags candidates, not recommendations
+- Don't generate a report without Search Log section — every ticker needs a verified price row
+- Don't generate a report without Validation Summary (Devil's Gate) section
+- Don't generate a report without running `vault preflight` first — data must be fresh, auto-patches refreshed
+- Don't ignore concentration blockers from self-analyze — if GOOGL is >15%, no BUY MORE

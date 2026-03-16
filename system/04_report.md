@@ -30,10 +30,11 @@ Include benchmark: "Your portfolio: +X.X%. VOO over same period: +X.X%."
 **Mandatory.** Include the Search Log table from `vault search-log` or `db.generate_search_log(tickers)`.
 Every ticker mentioned in the report must have a verified price row. If a ticker is missing → it cannot appear in recommendations.
 
-### 4. Your Portfolio (ONLY when portfolio.md has holdings)
+### 4. Your Portfolio (ONLY when DB has holdings)
 | Stock | Shares | Cost | Current | P&L | Action |
 Grouped by urgency: SELL first, then HOLD, then BUY more.
-**When portfolio.md is empty:** Skip entirely. Don't mention it.
+**When DB has no holdings:** Skip entirely. Don't mention it.
+Read holdings from `db.portfolio_dashboard()`, not portfolio.md.
 
 ### 5. What to Buy
 Table from Strategy phase. Each pick with: ticker, conviction (asterisks), entry, stop, why, size.

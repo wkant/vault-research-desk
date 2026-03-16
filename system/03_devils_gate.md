@@ -39,10 +39,10 @@ The following sectors exceed the 35% limit. No new BUYs in these sectors:
 Run all eight. Each produces PASS / FLAG / REJECT.
 
 ### Test 0: Portfolio Reality Check
-1. Read portfolio.md. Does it have holdings, or is it empty?
+1. Read DB holdings (`db.get_holdings()`). Does it have holdings, or is it empty?
 2. If empty: report must NOT have HOLD/SELL calls or a "Your Portfolio" section
 3. If has holdings: every holding must be addressed. No phantom holdings.
-4. Cross-reference: any holding in the report that's not in portfolio.md → CRITICAL REJECT
+4. Cross-reference: any holding in the report that's not in DB → CRITICAL REJECT
 
 ### Test 1: Thesis Flip Test
 For each BUY recommendation, argue the exact opposite. Rate the counter-argument 1-5:

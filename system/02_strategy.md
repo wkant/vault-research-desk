@@ -32,7 +32,7 @@ with VaultDB() as db:
 For every active call from the last report:
 | Pick | Rec. Price | Current | P&L | Thesis Intact? |
 - Be honest. If a call was wrong, say why.
-- A past BUY recommendation does NOT mean the investor bought it. Check portfolio.md.
+- A past BUY recommendation does NOT mean the investor bought it. Check DB holdings (`vault portfolio`).
 
 Include benchmark comparison:
 ```
@@ -40,7 +40,7 @@ Portfolio since inception: +X.X%
 VOO over same period: +X.X%
 ```
 
-### 2. Portfolio Calls (only if portfolio.md has holdings)
+### 2. Portfolio Calls (only if DB has holdings)
 For each holding:
 | Stock | Shares | Cost | Current | P&L | Action | Reasoning |
 - Actions: HOLD / BUY MORE / TRIM / SELL
@@ -114,7 +114,7 @@ Sectors or stocks to stay away from. One sentence each with specific reason.
 ### 7. Cash Allocation
 How much to keep in cash from available capital, and why.
 
-**Decision framework (based on portfolio.md risk tolerance + current conditions):**
+**Decision framework (based on DB risk tolerance setting + current conditions):**
 - Read target cash range from 00_system.md Position Sizing table (Conservative: 25-30%, Moderate: 15-20%, Aggressive: 5-10%)
 - **Increase cash** toward the high end if: VIX > 25, major event within 7 days (FOMC, earnings), market down >5% in 2 weeks
 - **Decrease cash** toward the low end if: VIX < 15, strong breadth (>70% above 200 DMA), no major events

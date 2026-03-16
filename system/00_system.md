@@ -59,16 +59,18 @@ Flash skips Devil's Gate. Speed over perfection in emergencies.
 
 ## Portfolio — Single Source of Truth
 
-**`portfolio.md` is the ONLY source of truth for the investor's holdings, settings, and profile.**
+**`vault.db` is the source of truth for the investor's holdings, settings, and profile.**
 
-- All investor-specific data (name, broker, risk tolerance, monthly investment, holdings) lives in portfolio.md
-- If portfolio.md has holdings → report includes HOLD/SELL calls, P&L, rebalance checks
-- If portfolio.md is empty → ALL recommendations are new BUYs, no "Your Portfolio" section
+- All investor data lives in the DB: holdings table (positions), settings table (risk tolerance, cash, profile)
+- Read holdings via `db.get_holdings()` or `db.portfolio_dashboard()` — never parse portfolio.md
+- If DB has holdings → report includes HOLD/SELL calls, P&L, rebalance checks
+- If DB has no holdings → ALL recommendations are new BUYs, no "Your Portfolio" section
+- portfolio.md is an auto-generated export (`vault portfolio export`), not the master
+- Updates go through `vault portfolio add/update/remove/cash` commands
 - NEVER use memory, chat history, or past reports to determine holdings
 - NEVER assume the investor bought something because a previous report recommended it
-- The system NEVER modifies portfolio.md — only the investor updates it (unless explicitly asked)
 
-**Why:** The system once built an entire report around 6 stocks the investor didn't own. The portfolio file was empty. Every HOLD call was fiction. This rule prevents that from ever happening again.
+**Why:** The system once built an entire report around 6 stocks the investor didn't own. DB-first architecture prevents this — all tools read from the same single database.
 
 ---
 
