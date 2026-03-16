@@ -583,8 +583,7 @@ def main():
     # --- Sync to DB ---
     try:
         with VaultDB() as db:
-            # Sync holdings from portfolio.md
-            db.sync_holdings_from_portfolio()
+            # DB is master for holdings (no sync from portfolio.md)
 
             # Save market snapshot
             if macro_prices:

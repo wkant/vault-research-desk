@@ -380,6 +380,8 @@ CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker);
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_institutional_ticker ON institutional(ticker);
 CREATE INDEX IF NOT EXISTS idx_consensus_ticker ON consensus(ticker);
+CREATE INDEX IF NOT EXISTS idx_learnings_consumed ON learnings(consumed);
+CREATE INDEX IF NOT EXISTS idx_learnings_created ON learnings(created_at);
 
 -- Portfolio settings (DB-first, exported to portfolio.md)
 CREATE TABLE IF NOT EXISTS settings (
@@ -1467,6 +1469,25 @@ class VaultDB:
             self.conn.execute("UPDATE learnings SET consumed=1 WHERE consumed=0")
         self.conn.commit()
 
+    def auto_cleanup(self):
+        """Auto-cleanup stale data: mark old learnings consumed, resolve old improvements."""
+        # Mark learnings older than 7 days as consumed
+        self.conn.execute("""
+            UPDATE learnings SET consumed=1
+            WHERE consumed=0 AND created_at < datetime('now', '-7 days')
+        """)
+        # Mark duplicate improvements as obsolete (keep only latest per finding)
+        self.conn.execute("""
+            UPDATE improvements SET status='obsolete'
+            WHERE status='active' AND id NOT IN (
+                SELECT max(id) FROM improvements
+                WHERE status='active'
+                GROUP BY type, category, finding
+            )
+        """)
+        self.conn.commit()
+        self.conn.commit()
+
     def get_learnings_summary(self):
         """Formatted summary for report consumption.
         Returns a string with portfolio-specific smart money insights."""
@@ -1734,12 +1755,13 @@ class VaultDB:
             'over_concentrated': [c for c in concentrations if c['over_limit']],
         }
 
-    def _generate_action_items(self):
+    def _generate_action_items(self, risk=None, dashboard=None):
         """Synthesize all signals into specific action items."""
         actions = []
 
         # 1. Concentration warnings
-        risk = self.risk_dashboard()
+        if risk is None:
+            risk = self.risk_dashboard()
         if risk:
             over = risk.get('over_concentrated', [])
             worst = max(over, key=lambda c: c['pct']) if over else None
@@ -1786,7 +1808,8 @@ class VaultDB:
                 break  # Only one holding signal
 
         # 5. Profit-taking thresholds on holdings (batch price fetch)
-        dashboard = self.portfolio_dashboard()
+        if dashboard is None:
+            dashboard = self.portfolio_dashboard()
         for h in dashboard:
             ticker = h['ticker']
             current = h['current_price'] or 0
@@ -1883,6 +1906,9 @@ class VaultDB:
         Returns a markdown-formatted Search Log string per 00_system.md requirements.
         Tickers should include all tickers that will appear in the report.
         """
+        if not tickers:
+            return "### Search Log\n\n*No tickers to verify.*\n"
+
         # Batch fetch all prices in one query
         placeholders = ",".join("?" * len(tickers))
         rows = self.conn.execute(f"""
@@ -1922,8 +1948,15 @@ class VaultDB:
         lines.append(f"  MORNING BRIEFING — {now.strftime('%A, %B %d %Y  %H:%M')}")
         lines.append(f"{'=' * 58}")
 
+        # ── Auto-cleanup stale data ──
+        self.auto_cleanup()
+
+        # ── Compute once, pass everywhere ──
+        holdings = self.portfolio_dashboard()
+        risk = self.risk_dashboard()
+
         # ── Action Items (synthesized from all signals) ──
-        actions = self._generate_action_items()
+        actions = self._generate_action_items(risk=risk, dashboard=holdings)
         if actions:
             lines.append("")
             lines.append(f"  ACTION ITEMS")
@@ -1960,8 +1993,6 @@ class VaultDB:
                 lines.append(f"  Breadth: {b200:.0f}% above 200 DMA — {health}")
 
         # ── Portfolio ──
-        holdings = self.portfolio_dashboard()
-        risk = self.risk_dashboard()
 
         lines.append("")
         lines.append(f"  PORTFOLIO ({risk.get('position_count', 0)} positions)")

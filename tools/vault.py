@@ -127,8 +127,13 @@ def cmd_portfolio(args):
         # vault portfolio add TICKER SHARES COST [DATE]
         if action == 'add' and len(args) >= 4:
             ticker = args[1].upper()
-            shares = float(args[2])
-            cost = float(args[3].replace('$', ''))
+            try:
+                shares = float(args[2])
+                cost = float(args[3].replace('$', ''))
+            except ValueError:
+                print("  Error: shares and cost must be numbers")
+                print("  Example: vault portfolio add XOM 5 156.12")
+                return
             date_bought = args[4] if len(args) > 4 else None
 
             etfs = {"XLE", "XLV", "XLK", "XLF", "XLY", "XLP", "XLI", "XLB",
@@ -457,6 +462,10 @@ def cmd_audit(args):
             print("No reports found in reports/")
             return
         report_path = md_files[-1]
+
+    if not os.path.exists(report_path):
+        print(f"Report not found: {report_path}")
+        return
 
     with open(report_path, "r") as f:
         content = f.read()
@@ -1207,7 +1216,7 @@ def cmd_project(args):
         fv_start = current * (1 + monthly_rate) ** months
         fv_monthly = monthly * (((1 + monthly_rate) ** months - 1) / monthly_rate)
         total = fv_start + fv_monthly
-        roi = (total - total_invested) / total_invested * 100
+        roi = (total - total_invested) / total_invested * 100 if total_invested > 0 else 0
         print(f"  {roi:>13.0f}%", end="")
     print()
 
@@ -1517,6 +1526,10 @@ def cmd_plan(args):
         match = next((p for p in plans if target in os.path.basename(p).lower()), None)
         if match:
             plans = [match]
+        else:
+            print(f"No plan matching '{args[0]}' found.")
+            print(f"Available: {', '.join(os.path.basename(p) for p in plans[:5])}")
+            return
 
     # Show most recent or specified plan
     path = plans[0]

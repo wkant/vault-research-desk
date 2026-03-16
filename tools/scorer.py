@@ -307,6 +307,8 @@ def print_scorecard(trades, voo_returns):
     print(f"  Alpha: {format_pct(alpha)}")
 
     # --- Kelly Criterion (after 20+ closed trades) ---
+    winners = sum(1 for r in returns if r > 0)
+    losers = sum(1 for r in returns if r < 0)
     if closed_count >= 20 and winners > 0 and losers > 0:
         win_returns = [r for r in returns if r > 0]
         loss_returns = [abs(r) for r in returns if r < 0]
