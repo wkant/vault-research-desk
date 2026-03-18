@@ -303,7 +303,7 @@ def print_section(title, results, columns="default"):
         for r in results:
             vs50 = _fmt_pct(r["price"], r.get("dma_50"))
             vs200 = _fmt_pct(r["price"], r.get("dma_200"))
-            rsi_str = f"{r['rsi']:.1f}" if r["rsi"] is not None else "-"
+            rsi_str = f"{r.get('rsi'):.1f}" if r.get("rsi") is not None else "-"
             print(f"  {r['ticker']:<8} {r['price']:>9.2f} {rsi_str:>6} {vs50:>9} {vs200:>9} {_earnings_col(r):>14}")
     elif columns == "volume":
         header = f"  {'Ticker':<8} {'Price':>9} {'Volume':>12} {'AvgVol(4d)':>12} {'Ratio':>7}"

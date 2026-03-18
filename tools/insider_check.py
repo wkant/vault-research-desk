@@ -692,10 +692,16 @@ def print_report(results: list, days: int = None):
                 total = t.get("total_value", 0)
 
                 # Format shares
-                if shares == int(shares):
-                    shares_str = f"{int(shares):,}"
-                else:
-                    shares_str = f"{shares:,.2f}"
+                try:
+                    import math
+                    if math.isfinite(shares) and shares == int(shares):
+                        shares_str = f"{int(shares):,}"
+                    elif math.isfinite(shares):
+                        shares_str = f"{shares:,.2f}"
+                    else:
+                        shares_str = "N/A"
+                except (ValueError, TypeError, OverflowError):
+                    shares_str = "N/A"
 
                 # Build the line
                 value_str = format_dollar(total) if total > 0 else ""

@@ -43,7 +43,7 @@ After a position moves in your favor:
 | +20% | Move stop to +10% above entry |
 | +30% | Move stop to +20% above entry |
 
-**Update trailing stops in portfolio.md notes or at each report.**
+**Update trailing stops in vault.db (via `vault portfolio update`) or at each report.**
 
 ### When a Stop Triggers
 - The stop triggered → the position is SOLD. No "let me hold a little longer."
@@ -127,7 +127,7 @@ Status values: OPEN / HIT_TARGET / STOPPED_OUT / CLOSED_EARLY / EXPIRED
 
 ## Tax Awareness
 
-Tax rules depend on the investor's location (read from portfolio.md Profile section).
+Tax rules depend on the investor's location (read from vault.db via `vault portfolio`).
 - Research the investor's local tax treatment of foreign investment income
 - Tax-loss harvesting: if a position is down and thesis is broken, selling crystallizes a loss that may offset gains
 - Keep records of all trades for annual declaration

@@ -8,7 +8,7 @@ Take the Research output and produce actionable calls: what to hold, what to buy
 - `tools/data_fetcher.py` output (verified prices, moving averages, RSI, breadth for all relevant tickers)
 - `tools/screener.py` output (ranked candidates with RSI, DMA crossovers, volume signals)
 - Active improvements from vault.db (self-analysis feedback — concentration limits, bias corrections, past mistakes)
-- `portfolio.md` (current holdings, cash, risk tolerance, monthly investment)
+- `vault.db` (current holdings, cash, risk tolerance, monthly investment — via `vault portfolio`)
 - Previous report (for performance review and consistency)
 - `system/05_position_mgmt.md` (rules for sizing, scaling, stops)
 - Smart money signals from vault.db (ARK trades, guru consensus, 13F, insider buys)
@@ -74,7 +74,7 @@ Three scenarios: bull, base, bear. With specific trigger for each.
 
 <!-- AUTO-FIX: REPETITION GUARD -->
 **REPETITION GUARD (auto-added by self-analyze):**
-Detected repeated recommendations without new evidence: GOOGL (2x), GLD (2x).
+Detected repeated recommendations without new evidence: GLD (3x), GOOGL (3x).
 If a ticker was already recommended AND the investor bought it, switch to HOLD analysis. Only recommend again with a NEW catalyst.
 
 <!-- END REPETITION GUARD -->
@@ -94,10 +94,7 @@ For each pick:
 | Size | Dollar amount and % of available capital |
 | What changes this call | Specific trigger to exit |
 
-**Entry zone rules (see unified rules in 00_system.md):**
-- Within 5% of verified price = PASS
-- 5-7% gap = FLAG (requires justification: limit order, expected pullback)
-- >7% gap = REJECT (auto-reject unless extraordinary circumstances)
+**Entry zone rules:** Apply entry zone rules from 00_system.md.
 - Stop < entry < target (always)
 - Risk/reward minimum 2:1 for all picks (`***` and `**`), 1.5:1 acceptable for `*` speculative only
 - Use tools/data_fetcher.py technicals (50/200 DMA, RSI) for level-setting

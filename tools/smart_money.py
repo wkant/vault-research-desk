@@ -125,8 +125,14 @@ def cmd_ark(args):
             # Check if cache is recent enough (< 4 hours)
             latest = cached[0] if cached else None
             if latest:
-                cached_at = datetime.fromisoformat(latest["cached_at"])
-                age_hrs = (datetime.now() - cached_at).total_seconds() / 3600
+                try:
+                    cached_at = datetime.fromisoformat(latest["cached_at"])
+                except (ValueError, TypeError):
+                    cached_at = None  # Treat as expired cache
+                if cached_at is None:
+                    age_hrs = float("inf")
+                else:
+                    age_hrs = (datetime.now() - cached_at).total_seconds() / 3600
                 if age_hrs < 4:
                     _print_ark_trades(cached, from_cache=True)
                     return
@@ -298,8 +304,14 @@ def cmd_gurus(args):
             # Check cache
             cached = db.get_guru_holdings(guru_code=code)
             if cached and not args.no_cache:
-                cached_at = datetime.fromisoformat(cached[0]["cached_at"])
-                age_days = (datetime.now() - cached_at).total_seconds() / 86400
+                try:
+                    cached_at = datetime.fromisoformat(cached[0]["cached_at"])
+                except (ValueError, TypeError):
+                    cached_at = None  # Treat as expired cache
+                if cached_at is None:
+                    age_days = float("inf")
+                else:
+                    age_days = (datetime.now() - cached_at).total_seconds() / 86400
                 if age_days < 7:  # Cache for 7 days (quarterly data)
                     name = cached[0]["guru_name"]
                     print(f"\n  {name} ({code}) — {len(cached)} holdings (cached)")

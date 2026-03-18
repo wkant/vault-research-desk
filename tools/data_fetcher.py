@@ -102,8 +102,48 @@ SECTOR_NAMES = {
 
 
 def read_portfolio():
-    """Read tickers from portfolio.md"""
+    """Read portfolio from vault.db (primary) with portfolio.md fallback."""
     import os
+
+    # --- DB-first: read from vault.db ---
+    try:
+        from db import VaultDB
+        with VaultDB() as db:
+            db_holdings = db.get_holdings()
+            if db_holdings:
+                tickers = []
+                holdings = {}
+                for h in db_holdings:
+                    t = h['ticker']
+                    tickers.append(t)
+                    holdings[t] = {
+                        'shares': h['shares'],
+                        'cost': h['cost_basis'],
+                        'date': h['date_bought'] or '',
+                    }
+
+                # Read settings from DB
+                db_settings = db.get_all_settings()
+                settings = {}
+                for key in ['risk_tolerance', 'monthly_investment', 'cash_available',
+                            'name', 'location', 'broker', 'experience', 'preference', 'start_date']:
+                    val = db_settings.get(key, '')
+                    if val:
+                        settings[key] = val
+                        # Parse numeric values
+                        if key in ('monthly_investment', 'cash_available'):
+                            try:
+                                settings[key] = float(
+                                    str(val).replace('$', '').replace(',', '').replace('€', '')
+                                )
+                            except ValueError:
+                                pass
+
+                return tickers, holdings, settings
+    except Exception as e:
+        print(f"  Note: DB read failed ({e}), falling back to portfolio.md", file=sys.stderr)
+
+    # --- Fallback: read from portfolio.md ---
     portfolio_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "portfolio.md")
     tickers = []
     holdings = {}
@@ -122,7 +162,7 @@ def read_portfolio():
                 parts = [p.strip() for p in line.split('|') if p.strip()]
                 if len(parts) >= 3 and parts[0] and parts[0] != '':
                     ticker = parts[0]
-                    if ticker and ticker.isalpha():
+                    if ticker and all(c.isalnum() or c in '-.' for c in ticker):
                         tickers.append(ticker)
                         try:
                             holdings[ticker] = {
@@ -161,7 +201,24 @@ def read_portfolio():
 
 
 def fetch_quote(ticker):
-    """Fetch current price and key data for a ticker."""
+    """Fetch current price and key data for a ticker.
+    Returns cached quote if one exists within 5 minutes to avoid redundant API calls."""
+    # Check DB cache first (5-minute TTL)
+    try:
+        with VaultDB() as db:
+            cached = db.get_cached_quote(ticker, max_age_minutes=5)
+            if cached:
+                return {
+                    'price': cached['price'],
+                    'prev_close': cached['prev_close'],
+                    'change_pct': cached['change_pct'],
+                    'high': cached['high'],
+                    'low': cached['low'],
+                    'volume': cached.get('volume', 0),
+                }
+    except Exception:
+        pass  # Cache miss or DB error — fall through to yfinance
+
     try:
         t = yf.Ticker(ticker)
         hist = t.history(period="5d")
@@ -181,8 +238,12 @@ def fetch_quote(ticker):
             'change_pct': change_pct,
             'high': round(current['High'], 2),
             'low': round(current['Low'], 2),
-            'volume': int(current['Volume']),
+            'volume': 0,
         }
+        try:
+            result['volume'] = int(current['Volume'])
+        except (ValueError, TypeError):
+            pass
 
         try:
             with VaultDB() as db:
@@ -196,7 +257,24 @@ def fetch_quote(ticker):
 
 
 def fetch_technicals(ticker):
-    """Fetch technical indicators: 50 DMA, 200 DMA, RSI."""
+    """Fetch technical indicators: 50 DMA, 200 DMA, RSI.
+    Returns cached technicals if one exists within 15 minutes to avoid redundant API calls."""
+    # Check DB cache first (15-minute TTL)
+    try:
+        with VaultDB() as db:
+            cached = db.get_cached_technicals(ticker, max_age_minutes=15)
+            if cached:
+                return {
+                    'rsi': cached.get('rsi'),
+                    'dma_50': cached.get('dma_50'),
+                    'dma_200': cached.get('dma_200'),
+                    'high_52w': cached.get('high_52w'),
+                    'low_52w': cached.get('low_52w'),
+                    'pct_from_high': cached.get('pct_from_high'),
+                }
+    except Exception:
+        pass  # Cache miss or DB error — fall through to yfinance
+
     try:
         t = yf.Ticker(ticker)
         hist = t.history(period="1y")
@@ -216,9 +294,13 @@ def fetch_technicals(ticker):
         delta = close.diff()
         gain = delta.where(delta > 0, 0).rolling(14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        result['rsi'] = round(rsi.iloc[-1], 1)
+        last_loss = loss.iloc[-1]
+        last_gain = gain.iloc[-1]
+        if pd.isna(last_loss) or pd.isna(last_gain) or last_loss == 0:
+            result['rsi'] = 50.0
+        else:
+            rs_val = last_gain / last_loss
+            result['rsi'] = round(100 - (100 / (1 + rs_val)), 1)
 
         # 52-week high/low
         result['high_52w'] = round(close.max(), 2)
@@ -254,7 +336,8 @@ def fetch_earnings_date(ticker):
         # Try earnings_dates attribute
         ed = t.earnings_dates
         if ed is not None and not ed.empty:
-            future = ed.index[ed.index >= pd.Timestamp.now(tz='America/New_York')]
+            idx = ed.index.tz_localize(None) if ed.index.tz is not None else ed.index
+            future = idx[idx >= pd.Timestamp.now()]
             if len(future) > 0:
                 return str(future[0].date())
     except Exception:
@@ -368,8 +451,8 @@ def main():
                 price = q['price']
                 chg = q['change_pct']
                 rsi = tech.get('rsi', '-')
-                vs50 = f"{((price - tech['dma_50']) / tech['dma_50'] * 100):+.1f}%" if 'dma_50' in tech else '-'
-                vs200 = f"{((price - tech['dma_200']) / tech['dma_200'] * 100):+.1f}%" if 'dma_200' in tech else '-'
+                vs50 = f"{((price - tech['dma_50']) / tech['dma_50'] * 100):+.1f}%" if 'dma_50' in tech and tech['dma_50'] and not pd.isna(tech['dma_50']) else '-'
+                vs200 = f"{((price - tech['dma_200']) / tech['dma_200'] * 100):+.1f}%" if 'dma_200' in tech and tech['dma_200'] and not pd.isna(tech['dma_200']) else '-'
                 sign = '+' if chg >= 0 else ''
                 print(f"{name:<16} {ticker:<6} {price:>8.2f} {sign}{chg:>6.2f}% {rsi:>5} {vs50:>7} {vs200:>7}")
                 sector_data.append((name, ticker, price, chg, rsi))
@@ -414,12 +497,12 @@ def main():
             print(f"  52-wk range: ${tech.get('low_52w', '-')} - ${tech.get('high_52w', '-')} ({tech.get('pct_from_high', '-')}% from high)")
 
     # --- Portfolio Holdings (detailed) ---
+    total_value = 0
+    total_cost = 0
     if port_tickers:
         print(f"\n{'─' * 40}")
         print("PORTFOLIO HOLDINGS — DETAILED")
         print(f"{'─' * 40}")
-        total_value = 0
-        total_cost = 0
         for ticker in port_tickers:
             q = fetch_quote(ticker)
             tech = fetch_technicals(ticker)
@@ -493,7 +576,7 @@ def main():
             print(f"  Could not run alerts: {e}")
 
     # --- Log benchmark to DB ---
-    if not portfolio_only and port_tickers:
+    if not portfolio_only and port_tickers and total_cost > 0:
         try:
             _log_benchmark(total_value, total_cost)
         except Exception as e:
@@ -543,7 +626,7 @@ def main():
                 req = Request(url, headers={"Accept": "application/json"})
                 with urlopen(req, timeout=10) as resp:
                     recs = _json.loads(resp.read())
-                if recs and len(recs) > 0:
+                if isinstance(recs, list) and len(recs) > 0 and isinstance(recs[0], dict):
                     latest = recs[0]
                     total = latest.get('strongBuy',0) + latest.get('buy',0) + latest.get('hold',0) + latest.get('sell',0) + latest.get('strongSell',0)
                     if total > 0:
@@ -570,10 +653,11 @@ def main():
                 cal = _json.loads(resp.read())
             if cal and "earningsCalendar" in cal:
                 relevant = [e for e in cal["earningsCalendar"]
-                           if e.get("symbol") in set(port_tickers + extra_tickers)]
+                           if isinstance(e, dict) and e.get("symbol") in set(port_tickers + extra_tickers)]
                 if relevant:
                     for e in sorted(relevant, key=lambda x: x.get("date", "")):
-                        est = f"EPS est: ${e['epsEstimate']:.2f}" if e.get('epsEstimate') else "no estimate"
+                        eps_val = e.get('epsEstimate')
+                        est = f"EPS est: ${eps_val:.2f}" if isinstance(eps_val, (int, float)) else "no estimate"
                         print(f"  {e['date']}  {e['symbol']:6s}  {est}  ⚠️ EARNINGS")
                 else:
                     print("  No portfolio/candidate earnings in next 30 days.")
@@ -588,8 +672,8 @@ def main():
             # Save market snapshot
             if macro_prices:
                 today = datetime.now().strftime("%Y-%m-%d")
-                breadth_50 = breadth.get('above_50dma_pct') if not portfolio_only and breadth else None
-                breadth_200 = breadth.get('above_200dma_pct') if not portfolio_only and breadth else None
+                breadth_50 = breadth.get('above_50dma_pct') if not portfolio_only and breadth is not None else None
+                breadth_200 = breadth.get('above_200dma_pct') if not portfolio_only and breadth is not None else None
                 db.save_market_snapshot(
                     date=today,
                     spy=macro_prices.get("^GSPC"),

@@ -17,6 +17,16 @@ from db import VaultDB
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def _safe_float(value):
+    """Convert value to float, returning None for empty strings, 'N/A', etc."""
+    if not value:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
 def extract_report_date(text):
     m = re.search(r"(\d{4}-\d{2}-\d{2})", text)
     return m.group(1) if m else ""
@@ -154,7 +164,7 @@ def main():
             db.add_watchlist(
                 date=report_date,
                 ticker=pick["ticker"],
-                price_at_rec=float(pick["entry"]) if pick["entry"] else None,
+                price_at_rec=_safe_float(pick["entry"]),
                 conviction=pick["conviction"],
                 report=report_name,
                 notes=pick["why"],

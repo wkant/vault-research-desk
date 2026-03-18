@@ -499,9 +499,14 @@ def extract_report_date(text):
 
 
 def conviction_stars_to_level(raw):
-    """Convert star-based conviction (e.g. '***') to HIGH/MEDIUM/LOW."""
+    """Convert star-based conviction (e.g. '***') or text ('HIGH') to HIGH/MEDIUM/LOW."""
     if not raw:
         return "MEDIUM"
+    raw_upper = str(raw).strip().upper()
+    # Handle text format directly
+    if raw_upper in ("HIGH", "MEDIUM", "LOW"):
+        return raw_upper
+    # Handle star format
     stars = raw.count("*")
     if stars >= 3:
         return "HIGH"

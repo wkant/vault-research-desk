@@ -411,7 +411,8 @@ def analyze_report_quality(reports):
                         watchlist_picks += 1
                         # Check if this row has a stop defined (not TBD/—)
                         line_lower = line.lower()
-                        if "tbd" not in line_lower and "—" not in line_lower.split("stop")[0] if "stop" in line_lower else True:
+                        has_stop_field = "stop" in line_lower
+                        if not has_stop_field or ("tbd" not in line_lower and "—" not in line_lower):
                             if re.search(r'\$\d+', line):
                                 watchlist_with_stops += 1
 

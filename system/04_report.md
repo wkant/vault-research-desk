@@ -1,7 +1,7 @@
 # Phase 4: Report
 
 ## Purpose
-Translate the analysis into a report the investor can read and act on. Write like a smart friend explaining over coffee. Warm, direct, never condescending. Read the investor's name and experience level from portfolio.md — address them personally.
+Translate the analysis into a report the investor can read and act on. Write like a smart friend explaining over coffee. Warm, direct, never condescending. Read the investor's name and experience level from vault.db — address them personally.
 
 ## Voice Rules
 - No jargon without immediate plain-English translation
@@ -85,6 +85,20 @@ One short paragraph. Educational purposes only. Not financial advice.
 
 ---
 
+
+<!-- AUTO-FIX: SECTION CHECKLIST -->
+**SECTION CHECKLIST (auto-added by self-analyze):**
+Multiple reports have missing sections. Before finalizing, verify ALL sections exist:
+- [OK] What's Happening
+- [OK] Your Portfolio
+- [OK] What to Buy
+- [OK] What to Avoid
+- [OK] Biggest Risks
+- [OK] Gut Check
+- [OK] Bottom Line
+*Evidence: 4 reports with missing sections.*
+
+<!-- END SECTION CHECKLIST -->
 ## Devil's Gate Integration
 **The Devil's Gate summary MUST appear in the report.** Include it as a collapsed section or summary table after "What to Avoid":
 
@@ -127,7 +141,7 @@ When the investor confirms they executed trades based on a report:
    - Capital deployed and remaining cash
    - Status: ACTIVE / CLOSED
 2. Run `python3 tools/html_report.py trades/trade_YYYY-MM-DD.md` — **always generate HTML**
-3. Update `portfolio.md` (only when the investor explicitly asks)
+3. Update DB via `vault portfolio add/update/remove` (only when the investor explicitly asks)
 4. Performance data is auto-tracked in vault.db
 
 **Reports are analysis. Trades are actions.** Not every report leads to a trade.

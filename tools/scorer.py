@@ -177,7 +177,7 @@ def print_scorecard(trades, voo_returns):
     exit_dates = [t["exit_date"] for t in trades if t["exit_date"]]
     all_dates = dates + exit_dates
     period_start = min(all_dates) if all_dates else "N/A"
-    period_end = max(all_dates) if all_dates else date.today()
+    period_end = max(all_dates) if all_dates else "N/A"
     if not exit_dates:
         period_end = date.today()
 
@@ -198,8 +198,9 @@ def print_scorecard(trades, voo_returns):
     returns = [t["return_pct"] for t in trades if t["return_pct"] is not None]
     avg_return = sum(returns) / len(returns) if returns else None
 
-    best_trade = max(trades, key=lambda t: t["return_pct"] if t["return_pct"] is not None else float("-inf"))
-    worst_trade = min(trades, key=lambda t: t["return_pct"] if t["return_pct"] is not None else float("inf"))
+    trades_with_returns = [t for t in trades if t["return_pct"] is not None]
+    best_trade = max(trades_with_returns, key=lambda t: t["return_pct"]) if trades_with_returns else None
+    worst_trade = min(trades_with_returns, key=lambda t: t["return_pct"]) if trades_with_returns else None
 
     # --- By conviction ---
     conviction_buckets = {}
@@ -276,11 +277,11 @@ def print_scorecard(trades, voo_returns):
     print()
     print("RETURNS (including unrealized)")
     print(f"  Average: {format_pct(avg_return)}")
-    if best_trade["return_pct"] is not None:
+    if best_trade and best_trade["return_pct"] is not None:
         print(f"  Best: {best_trade['ticker']} ({format_pct(best_trade['return_pct'])})")
     else:
         print("  Best: N/A")
-    if worst_trade["return_pct"] is not None:
+    if worst_trade and worst_trade["return_pct"] is not None:
         print(f"  Worst: {worst_trade['ticker']} ({format_pct(worst_trade['return_pct'])})")
     else:
         print("  Worst: N/A")
@@ -408,8 +409,11 @@ def main():
                 wins = sum(1 for t in closed_with_return if t["return_pct"] > 0)
                 win_rate = (wins / len(closed_with_return)) * 100
 
-            best = max(trades, key=lambda t: t["return_pct"] if t["return_pct"] is not None else float("-inf"))
-            worst = min(trades, key=lambda t: t["return_pct"] if t["return_pct"] is not None else float("inf"))
+            if trades:
+                best = max(trades, key=lambda t: t["return_pct"] if t["return_pct"] is not None else float("-inf"))
+                worst = min(trades, key=lambda t: t["return_pct"] if t["return_pct"] is not None else float("inf"))
+            else:
+                best = worst = None
 
             holding_days = []
             for t in trades:
@@ -430,10 +434,10 @@ def main():
                 closed_trades=closed_count,
                 win_rate=win_rate,
                 avg_return=round(avg_return, 2) if avg_return is not None else None,
-                best_ticker=best["ticker"] if best["return_pct"] is not None else None,
-                best_return=round(best["return_pct"], 2) if best["return_pct"] is not None else None,
-                worst_ticker=worst["ticker"] if worst["return_pct"] is not None else None,
-                worst_return=round(worst["return_pct"], 2) if worst["return_pct"] is not None else None,
+                best_ticker=best["ticker"] if best and best["return_pct"] is not None else None,
+                best_return=round(best["return_pct"], 2) if best and best["return_pct"] is not None else None,
+                worst_ticker=worst["ticker"] if worst and worst["return_pct"] is not None else None,
+                worst_return=round(worst["return_pct"], 2) if worst and worst["return_pct"] is not None else None,
                 avg_holding_days=round(avg_holding, 1) if avg_holding is not None else None,
                 voo_avg=round(avg_voo, 2) if avg_voo is not None else None,
                 alpha=round(alpha, 2) if alpha is not None else None,

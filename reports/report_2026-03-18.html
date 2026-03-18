@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vault Research Desk — Report 2026-03-18</title>
+<style>
+/* Vault Research Desk — Light Financial Theme */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Source Serif 4', 'Georgia', serif;
+    background: #fafafa;
+    color: #1a1a1a;
+    line-height: 1.75;
+    padding: 0;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+}
+
+.page {
+    max-width: 820px;
+    margin: 0 auto;
+    background: #ffffff;
+    padding: 3rem 3.5rem 2.5rem;
+    min-height: 100vh;
+    box-shadow: 0 0 40px rgba(0,0,0,0.06);
+}
+
+/* --- Header --- */
+
+.report-header {
+    margin-bottom: 2rem;
+    padding-bottom: 1.2rem;
+    border-bottom: 2px solid #111111;
+}
+
+.report-header h1 {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #888888;
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    margin: 0 0 4px;
+    border: none;
+    padding: 0;
+}
+
+.report-header .title {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    color: #111111;
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+    margin: 0;
+}
+
+.report-header .subtitle {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 14px;
+    color: #666666;
+    margin-top: 6px;
+    font-weight: 400;
+}
+
+/* --- Fallback h1/h2 when no .report-header --- */
+
+h1 {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: #111111;
+    margin: 2rem 0 0.6rem;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #111111;
+    letter-spacing: -0.3px;
+}
+
+h2 {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: #333333;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin: 2.5rem 0 1rem;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+h2:first-child { margin-top: 0; }
+
+h3 {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #555555;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin: 1.6rem 0 0.6rem;
+}
+
+h4 {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #555555;
+    margin: 1.2rem 0 0.4rem;
+}
+
+/* --- Body text --- */
+
+p {
+    margin: 0.6rem 0;
+    color: #2a2a2a;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid #e8e8e8;
+    margin: 2rem 0;
+}
+
+strong {
+    color: #000000;
+    font-weight: 700;
+}
+
+em {
+    color: #555555;
+    font-style: italic;
+}
+
+/* --- Market Snapshot bar --- */
+
+.market-data {
+    background: #f5f6f8;
+    border: 1px solid #e2e4e8;
+    padding: 14px 20px;
+    margin: 1.2rem 0 1.5rem;
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.8;
+    color: #333333;
+}
+
+.market-data li {
+    list-style: none;
+    margin: 0;
+    padding: 2px 0;
+}
+
+.market-data ul {
+    margin: 0;
+    padding: 0;
+}
+
+/* --- Callout boxes --- */
+
+.callout {
+    border-left: 4px solid #333333;
+    background: #f8f8f8;
+    padding: 16px 20px;
+    margin: 1.2rem 0;
+    font-size: 14px;
+}
+
+.callout-warning {
+    border-left-color: #d4a017;
+    background: #fffbf0;
+}
+
+.callout-danger {
+    border-left-color: #c41e1e;
+    background: #fef7f7;
+}
+
+.callout-info {
+    border-left-color: #2a6cb6;
+    background: #f5f8fc;
+}
+
+.callout p {
+    margin: 0.3rem 0;
+}
+
+.callout-label {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 6px;
+    display: block;
+}
+
+.callout-warning .callout-label { color: #a07800; }
+.callout-danger .callout-label { color: #c41e1e; }
+.callout-info .callout-label { color: #2a6cb6; }
+
+/* --- Code --- */
+
+code {
+    font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    background: #f3f3f3;
+    border: 1px solid #e0e0e0;
+    padding: 1px 6px;
+    font-size: 12px;
+    color: #444444;
+}
+
+pre {
+    font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    background: #f5f6f8;
+    border: 1px solid #e2e4e8;
+    padding: 14px 18px;
+    overflow-x: auto;
+    margin: 1rem 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #333333;
+}
+
+pre code {
+    border: none;
+    padding: 0;
+    background: none;
+}
+
+/* --- Blockquotes --- */
+
+blockquote {
+    border-left: 3px solid #999999;
+    padding: 10px 18px;
+    margin: 1.2rem 0;
+    color: #555555;
+    background: #fafafa;
+    font-style: italic;
+}
+
+/* --- Lists --- */
+
+ul, ol {
+    margin: 0.7rem 0 0.7rem 1.4rem;
+}
+
+li {
+    margin: 0.4rem 0;
+    padding-left: 0.3rem;
+}
+
+li::marker {
+    color: #999999;
+}
+
+/* --- Tables --- */
+
+.table-wrap {
+    overflow-x: auto;
+    margin: 1rem 0 1.2rem;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+th {
+    background: #f5f6f8;
+    color: #333333;
+    font-weight: 600;
+    text-align: left;
+    padding: 10px 14px;
+    border-top: 2px solid #333333;
+    border-bottom: 1px solid #cccccc;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    white-space: nowrap;
+}
+
+td {
+    padding: 9px 14px;
+    border-bottom: 1px solid #eeeeee;
+    vertical-align: top;
+    color: #2a2a2a;
+}
+
+tbody tr:nth-child(even) td {
+    background: #fafbfc;
+}
+
+tbody tr:hover td {
+    background: #f0f4f8;
+}
+
+/* Numeric cells: right-align prices, percentages, numbers */
+td.num-right { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* --- Conviction indicators --- */
+
+.conviction {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+
+.conviction-high { color: #0d7d2c; }
+.conviction-med { color: #a07800; }
+.conviction-low { color: #888888; }
+
+/* --- P&L / Action colors --- */
+
+td.positive {
+    color: #0d7d2c;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 12.5px;
+}
+
+td.negative {
+    color: #c41e1e;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 12.5px;
+}
+
+td.action-buy {
+    color: #0d7d2c;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+td.action-sell {
+    color: #c41e1e;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+td.action-hold {
+    color: #7a6d00;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+td.action-avoid {
+    color: #b35000;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* --- Ticker labels --- */
+
+td:first-child {
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-weight: 600;
+    font-size: 12.5px;
+    color: #111111;
+}
+
+/* --- Summary line (Total deployed, Cash, etc.) --- */
+
+.summary-line {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: #333333;
+    background: #f5f6f8;
+    border: 1px solid #e2e4e8;
+    padding: 10px 16px;
+    margin: 0.8rem 0 1.5rem;
+}
+
+/* --- Status badges --- */
+
+.status-active {
+    display: inline-block;
+    background: #e8f5e9;
+    color: #0d7d2c;
+    border: 1px solid #b8ddb8;
+    padding: 3px 12px;
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}
+
+.status-closed {
+    display: inline-block;
+    background: #f0f0f0;
+    color: #777777;
+    border: 1px solid #cccccc;
+    padding: 3px 12px;
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}
+
+/* --- Footer --- */
+
+.footer {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    text-align: right;
+    color: #aaaaaa;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 3rem;
+    padding-top: 10px;
+    border-top: 1px solid #e0e0e0;
+}
+
+/* --- Print --- */
+
+@media print {
+    body { background: #fff; }
+    .page {
+        box-shadow: none;
+        padding: 1.5rem;
+    }
+    h1 { font-size: 20px; }
+    table { font-size: 11px; }
+    th, td { padding: 6px 10px; }
+    .market-data { background: #f8f8f8; }
+    .callout { break-inside: avoid; }
+    .table-wrap { break-inside: avoid; }
+    h2, h3 { break-after: avoid; }
+    .footer { font-size: 9px; }
+}
+
+/* --- Responsive --- */
+
+@media (max-width: 700px) {
+    .page {
+        padding: 1.5rem 1.2rem;
+    }
+    body { font-size: 14px; }
+    h1 { font-size: 20px; }
+    h2 { font-size: 13px; }
+    table { font-size: 11.5px; }
+    th, td { padding: 6px 8px; }
+    .market-data { font-size: 11.5px; }
+}
+
+</style>
+</head>
+<body>
+<div class="page">
+<div class="report-header">
+<h1>Vault Research Desk</h1>
+<div class="title">Report 2026-03-18</div>
+<div class="subtitle">FOMC Day — Decision at 2 PM ET, Deploy After Clarity</div>
+</div>
+<h2>What's Happening</h2>
+<p>Iran war, day 18. Israel killed Iran's top security official overnight. Iran struck a UAE natural gas field in retaliation. Iran's FM publicly denied asking for a ceasefire: "We never asked for one." Hormuz remains blocked. Despite escalation, oil fell to $93.40 (-2.9%) and VIX dropped to 21.6 — the market is looking past the war toward FOMC (data_fetcher.py).</p>
+<p>S&amp;P 6,716 (+0.25%), Nasdaq +0.47%. Markets are flat and waiting. FOMC decision at 2:00 PM ET today (9:00 PM Kyiv). Rate hold at 3.50-3.75% is 92% priced in — the dot plot and Powell's tone on oil-driven inflation are what matter. CPI was 2.4% in February (pre-oil spike). If Powell hints that March CPI will be ugly and no cuts are coming, expect a selloff. If he signals the oil shock is transitory and cuts are still on the table, risk assets rip.</p>
+<p>VIX 21.6 (down from 27 a week ago). Market breadth: 75% above 200 DMA (healthy), 42% above 50 DMA (near-term weak). GOOGL popped +1.75% today — strongest day since you bought it. XLE hit a new 52-week high at $58.51.</p>
+<p>Your portfolio: <strong>+1.4%</strong> since inception (March 10). VOO: <strong>~-0.9%</strong>. Alpha: <strong>~+2.3%</strong> (data_fetcher.py).</p>
+<h2>This Week</h2>
+<div class="table-wrap"><table>
+<thead><tr>
+<th scope="col">Day</th>
+<th scope="col">Event</th>
+<th scope="col">Why It Matters</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><strong>Wed Mar 18</strong></td>
+<td><strong>FOMC decision + dot plot + Powell presser</strong></td>
+<td>2:00 PM ET (9:00 PM Kyiv). Hold expected. Dots and tone are THE trade.</td>
+</tr>
+<tr>
+<td>Wed-Thu Mar 18-19</td>
+<td>NVIDIA GTC conference</td>
+<td>AI narrative. NVDA keynote could boost tech.</td>
+</tr>
+<tr>
+<td>Thu Mar 19</td>
+<td>Post-FOMC reaction day</td>
+<td>Day-2 moves often bigger than day-1 — best entry window.</td>
+</tr>
+<tr>
+<td>Fri Mar 20</td>
+<td><strong>Quad witching</strong> (options expiry + S&amp;P rebalance)</td>
+<td>Higher volatility, wider spreads. Don't chase.</td>
+</tr>
+<tr>
+<td>Ongoing</td>
+<td>Iran war — escalating, not de-escalating</td>
+<td>Israel struck Iranian official. Iran struck UAE. Hormuz blocked.</td>
+</tr>
+</tbody></table></div>
+<h2>Changes Since Last Report (March 15 &rarr; March 18)</h2>
+<div class="table-wrap"><table>
+<thead><tr>
+<th scope="col">Pick</th>
+<th scope="col">Rec. Price</th>
+<th scope="col">Current</th>
+<th scope="col">P&amp;L</th>
+<th scope="col">Thesis?</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>GOOGL (owned)</td>
+<td class="num-right">$305.00</td>
+<td class="num-right">$310.92</td>
+<td><strong>+1.9%</strong></td>
+<td>Strengthening — RSI 48.2 (up from 39.4). 8 top funds hold. Best day since purchase.</td>
+</tr>
+<tr>
+<td>XLE (owned)</td>
+<td class="num-right">$56.00</td>
+<td class="num-right">$58.51</td>
+<td><strong>+4.5%</strong></td>
+<td>Validated — new 52-wk high. RSI 75.0 OVERBOUGHT. War thesis confirmed.</td>
+</tr>
+<tr>
+<td>XLV (owned)</td>
+<td class="num-right">$152.00</td>
+<td class="num-right">$149.64</td>
+<td class="negative num-right">-1.6%</td>
+<td>Weakening — RSI 29.5 (deeper oversold). Approaching $140 hard stop. Watch closely.</td>
+</tr>
+<tr>
+<td>GLD (owned)</td>
+<td class="num-right">$470.00</td>
+<td class="num-right">$459.27</td>
+<td class="negative num-right">-2.3%</td>
+<td>Intact — gold soft despite war escalation. DXY weakness supports. Patience.</td>
+</tr>
+</tbody></table></div>
+<div class="table-wrap"><table>
+<thead><tr>
+<th scope="col">AVOID calls (from Mar 15)</th>
+<th scope="col">Price at call → Now</th>
+<th scope="col">Correct?</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>XLY (Cons. Disc.)</td>
+<td>$112.20 &rarr; $113.18</td>
+<td>NO (+0.9%)</td>
+</tr>
+<tr>
+<td>XLB (Materials)</td>
+<td>$49.40 &rarr; $49.52</td>
+<td>NO (+0.2%)</td>
+</tr>
+<tr>
+<td>XLRE (Real Estate)</td>
+<td>$42.58 &rarr; $42.72</td>
+<td>NO (+0.3%)</td>
+</tr>
+</tbody></table></div>
+<p>AVOID accuracy since Mar 15: 0/3. Short-term bounce, but all remain oversold with broken technicals.</p>
+<p>Portfolio: <strong>+1.4%</strong>. VOO: <strong>~-0.9%</strong>. Alpha: <strong>~+2.3%</strong>.</p>
+<h3>Search Log</h3>
+<div class="table-wrap"><table>
+<thead><tr>
+<th scope="col">#</th>
+<th scope="col">Ticker</th>
+<th scope="col">Verified Price</th>
+<th scope="col">Source</th>
+<th scope="col">Date</th>
+</tr></thead>
+<tbody>
+<tr>
+<td class="num-right">1</td>
+<td>GOOGL</td>
+<td class="num-right">$310.92</td>
+<td>data_fetcher.py</td>
+<td>2026-03-18</td>
+</tr>
+<tr>
+<td class="num-right">2</td>
+<td>XLE</td>
+<td class="num-right">$58.51</td>
+<td>data_fetcher.py</td>
+<td>2026-03-18</td>
+</tr>
+<tr>
+<td class="num-right">3</td>
+<td>XLV</td>
+<td class="num-right">$149.64</td>
+<td>data_fetcher.py</td>
+<td>2026-03-18</td>
+</tr>
+<tr>
+<td class="num-right">4</td>
+<td>GLD</td>
+<td class="num-right">$459.27</td>
+<td>data_fetcher.py</td>
+<td>2026-03-18</td>
+</tr>
+<tr>
+<td class="num-right">5</td>
+<td>XOM</td>
+<td class="num-right">$158.81</td>
+<td>data_fetcher.py</td>
+<td>2026-03-18</td>
+</tr>
+<tr>
+<td class="num-right">6</td>
+<td>XLU</td>
+<td class="num-right">$47.13</td>
+<td>data_fetcher.py</td>
+<td>2026-03-18</td>
+</tr>
+<tr>
+<td class="num-right">7</td>
+<td>LMT</td>
+<td class="num-right">$645.20</td>
+<td>data_fetcher.py</td>
+<td>2026-03-17</td>
+</tr>
+<tr>
+<td class="num-right">8</td>
+<td>XLP</td>
+<td class="num-right">$84.70</td>
+<td>data_fetcher.py</td>
+<td>2026-03-18</td>
+</tr>
+<tr>
+<td class="num-right">9</td>
+<td>VOO</td>
+<td class="num-right">$616.89</td>
+<td>data_fetcher.py</td>
+<td>2026-03-18</td>
+</tr>
+</tbody></table></div>
+<h2>Your Portfolio</h2>
+<div class="table-wrap"><table>
+<thead><tr>
+<th scope="col">Stock</th>
+<th scope="col">Shares</th>
+<th scope="col">Cost</th>
+<th scope="col">Current</th>
+<th scope="col">P&amp;L</th>
+<th scope="col">Action</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>GOOGL</td>
+<td class="num-right">1.1412</td>
+<td class="num-right">$305</td>
+<td class="num-right">$310.92</td>
+<td class="positive num-right">+1.9%</td>
+<td><strong>HOLD</strong> — 44% of portfolio, drops to ~6.7% after deployment. Do NOT add. Trim above $330 if still &gt;15%.</td>
+</tr>
+<tr>
+<td>XLE</td>
+<td class="num-right">3.5994</td>
+<td class="num-right">$56</td>
+<td class="num-right">$58.51</td>
+<td class="positive num-right">+4.5%</td>
+<td><strong>HOLD</strong> — New 52-wk high. RSI 75 overbought. Drops to ~4% after deployment. Don't chase, let it run.</td>
+</tr>
+<tr>
+<td>XLV</td>
+<td class="num-right">0.9814</td>
+<td class="num-right">$152</td>
+<td class="num-right">$149.64</td>
+<td class="negative num-right">-1.6%</td>
+<td><strong>HOLD</strong> — RSI 29.5, deeper oversold. Defensive name. <strong>Hard stop $140</strong> (200 DMA $144.37). Getting closer — monitor daily.</td>
+</tr>
+<tr>
+<td>GLD</td>
+<td class="num-right">0.1997</td>
+<td class="num-right">$470</td>
+<td class="num-right">$459.27</td>
+<td class="negative num-right">-2.3%</td>
+<td><strong>HOLD</strong> — War insurance. Gold soft but structural bull case (central banks, inflation hedge). Patience.</td>
+</tr>
+</tbody></table></div>
+<p><strong>Portfolio total:</strong> $804.00 (cost: $792.66, P&amp;L: +$11.33 / +1.4%)</p>
+<p><strong>SELL/TRIM check:</strong> No stop-losses hit. No theses broken. XLV is weakest — $149.64, still $9.64 above $140 stop (6.4% buffer). XLE overbought (RSI 75) but only +4.5% — too early to trim per profit-taking rules (+30% = first trim). Concentration in GOOGL (44%) and XLE (26%) resolved by $4,500 deployment.</p>
+<h2>What to Buy</h2>
+<p>Pavlo, you have <strong>$4,500</strong> ready. Regime: <strong>RISK-ON (75%)</strong> but FOMC today. Your plan to wait 2-3 days after FOMC is smart — deploy Friday March 20 or Monday March 23 with full clarity.</p>
+<p><strong>Deployment: all at once after FOMC clarity, or 2 tranches. Hold $900 (20%) cash reserve.</strong></p>
+<div class="table-wrap"><table>
+<thead><tr>
+<th scope="col">Ticker</th>
+<th scope="col">Name</th>
+<th scope="col">Conv.</th>
+<th scope="col">Entry</th>
+<th scope="col">Stop</th>
+<th scope="col">Target</th>
+<th scope="col">R:R</th>
+<th scope="col">Why</th>
+<th scope="col">Size</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>XOM</td>
+<td>ExxonMobil</td>
+<td><code>***</code></td>
+<td>$156-162</td>
+<td class="num-right">$143</td>
+<td>$190 (6-9mo)</td>
+<td>2.0:1</td>
+<td>Iran escalating — Israel killed top official, Iran struck UAE. Hormuz blocked. Integrated model = windfall at $85+ oil. War thesis strengthened overnight.</td>
+<td>$1,200 (27%)</td>
+</tr>
+<tr>
+<td>XLU</td>
+<td>Utilities Select</td>
+<td><code>**</code></td>
+<td>$46-48</td>
+<td>$44 (50 DMA)</td>
+<td>$54 (6mo)</td>
+<td>2.1:1</td>
+<td>Defensive rotation leader. RSI 47.2 = healthy. +9.6% above 200 DMA. ~3% yield. Contraction cycle sector. Dipped slightly today — better entry.</td>
+<td>$900 (20%)</td>
+</tr>
+<tr>
+<td>LMT</td>
+<td>Lockheed Martin</td>
+<td><code>**</code></td>
+<td>$640-655</td>
+<td class="num-right">$595</td>
+<td>$750 (6-9mo)</td>
+<td>2.1:1</td>
+<td>Defense spending locked in bipartisan. War escalation = multi-year procurement. Near ATH ($692). Iran war expanding (UAE now targeted) = wider conflict = more defense.</td>
+<td>$800 (18%)</td>
+</tr>
+<tr>
+<td>XLP</td>
+<td>Consumer Staples</td>
+<td><code>*</code></td>
+<td>$83-86</td>
+<td class="num-right">$80</td>
+<td>$93 (6mo)</td>
+<td>1.8:1</td>
+<td>Stagflation hedge. RSI 26.6 = deeply oversold. People buy food in any economy. Dipped to $84.70 — better entry than Monday.</td>
+<td>$700 (15%)</td>
+</tr>
+</tbody></table></div>
+<p><strong>Cash reserved:</strong> $900 (20%) — for opportunities or if FOMC is hawkish.</p>
+<p><strong>Scaling plan (your decision to wait is the plan):</strong></p>
+<ul>
+<li><strong>Wait for FOMC (today 2 PM ET).</strong> Watch Powell's tone.</li>
+<li><strong>Deploy Fri Mar 20 or Mon Mar 23</strong> — after day-2 reaction settles.</li>
+<li>Consider 2 tranches if VIX spikes: half on Friday, half next week.</li>
+</ul>
+<p><strong>FOMC decision tree (for when you're ready to deploy):</strong></p>
+<ul>
+<li><strong>Dovish (rate cut signal, 2+ dots)</strong> &rarr; deploy full size. Consider swapping XLP for QQQ or XLK.</li>
+<li><strong>Neutral (hold, 1 dot, no change)</strong> &rarr; deploy as planned across all 4.</li>
+<li><strong>Hawkish (no cuts 2026)</strong> &rarr; deploy XOM and LMT only (war plays immune to rates). Hold XLU/XLP cash for a dip.</li>
+</ul>
+<p><strong>After deployment, portfolio looks like:</strong></p>
+<div class="table-wrap"><table>
+<thead><tr>
+<th scope="col">Position</th>
+<th scope="col">Value</th>
+<th scope="col">Weight</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>XOM (new)</td>
+<td class="num-right">$1,200</td>
+<td class="num-right">22.6%</td>
+</tr>
+<tr>
+<td>XLU (new)</td>
+<td class="num-right">$900</td>
+<td class="num-right">17.0%</td>
+</tr>
+<tr>
+<td>LMT (new)</td>
+<td class="num-right">$800</td>
+<td class="num-right">15.1%</td>
+</tr>
+<tr>
+<td>XLP (new)</td>
+<td class="num-right">$700</td>
+<td class="num-right">13.2%</td>
+</tr>
+<tr>
+<td>GOOGL</td>
+<td class="num-right">$355</td>
+<td class="num-right">6.7%</td>
+</tr>
+<tr>
+<td>XLE</td>
+<td class="num-right">$211</td>
+<td class="num-right">4.0%</td>
+</tr>
+<tr>
+<td>XLV</td>
+<td class="num-right">$147</td>
+<td class="num-right">2.8%</td>
+</tr>
+<tr>
+<td>GLD</td>
+<td class="num-right">$92</td>
+<td class="num-right">1.7%</td>
+</tr>
+<tr>
+<td>Cash</td>
+<td class="num-right">$900</td>
+<td class="num-right">17.0%</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>~$5,305</strong></td>
+<td><strong>100%</strong></td>
+</tr>
+</tbody></table></div>
+<p>Sectors: Energy 26.6%, Utilities 17.0%, Industrials 15.1%, Staples 13.2%, Tech 6.7%, Healthcare 2.8%, Commodities 1.7%, Cash 17.0%. No sector &gt;35% ✓.</p>
+<p><strong>Profit-taking note:</strong> XLE is +4.5% from entry. First trim threshold is +30% ($72.80). Not close yet — let it ride.</p>
+<h2>What to Avoid</h2>
+<ul>
+<li><strong>XLY (Consumer Discretionary)</strong> — Stagflation kills discretionary. RSI 35.2, still below 50 DMA.</li>
+<li><strong>XLB (Materials)</strong> — RSI 16.5, capitulation. No catalyst. Strong dollar headwind.</li>
+<li><strong>XLRE (Real Estate)</strong> — 10Y at 4.20%. Rate-sensitive. Avoid until cuts begin.</li>
+<li><strong>XLF (Financials)</strong> — RSI 29.4, -5.8% vs 200 DMA. War + rate uncertainty.</li>
+</ul>
+<h3>Validation Summary (Devil's Gate)</h3>
+<div class="callout callout-info">
+<span class="callout-label">Devil's Gate</span>
+<div class="table-wrap"><table>
+<thead><tr>
+<th scope="col">Test</th>
+<th scope="col">Result</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>0. Portfolio Reality</td>
+<td>PASS — 4 holdings match DB</td>
+</tr>
+<tr>
+<td>1. Thesis Flip</td>
+<td>FLAG — XOM (3/5 ceasefire risk, but escalation reduces ceasefire odds), LMT (3/5 defense premium)</td>
+</tr>
+<tr>
+<td>2. Contradiction Scan</td>
+<td>PASS — defensive picks match regime</td>
+</tr>
+<tr>
+<td>3. Doomsday Scenario</td>
+<td>FLAG — ceasefire collapses XOM/XLE; hedged by GOOGL/XLU/XLP</td>
+</tr>
+<tr>
+<td>4. Entry Zone Reality</td>
+<td>PASS — all entries within 2% of verified price</td>
+</tr>
+<tr>
+<td>5. Investor Test</td>
+<td>PASS — all on IBKR, fractional shares, clear sizing</td>
+</tr>
+<tr>
+<td>6. Consistency</td>
+<td>PASS — same picks, updated with fresh data and war escalation</td>
+</tr>
+<tr>
+<td>7. Omission Audit</td>
+<td>FLAG — no growth exposure despite risk-on regime</td>
+</tr>
+</tbody></table></div>
+<p><strong>Status:</strong> APPROVED WITH FLAGS</p>
+<p><strong>Doomsday:</strong> Sudden ceasefire &rarr; oil crashes to $75, XOM -15%, XLE -10%. Impact: ~-8% on energy positions. Hedge: GOOGL/XLU/XLP are ceasefire-neutral or positive. Only 27% in pure energy (XOM).</p>
+<p><strong>Flags:</strong> Ceasefire risk (lower probability now given escalation), LMT defense premium, no growth tilt (deferred to post-FOMC).</p>
+</div>
+<h2>Biggest Risks</h2>
+<ol>
+<li><strong>Hawkish FOMC surprise</strong> — Powell signals no cuts in 2026, oil inflation sticky. 10Y spikes above 4.5%. Impact: -3% to -5% across portfolio except GLD. Probability: 25%. Mitigation: 20% cash reserve, deploy only war plays (XOM/LMT) if hawkish.</li>
+</ol>
+<ol>
+<li><strong>Surprise ceasefire</strong> — Iran's FM denied it, but Trump claimed they want to negotiate. If ceasefire happens, oil collapses, XOM/XLE crushed. Probability: 10-15% (down from 20% — escalation makes it less likely). Mitigation: 73% of new capital is NOT pure energy.</li>
+</ol>
+<ol>
+<li><strong>XLV breaks $140</strong> — RSI 29.5, trending down. If healthcare selloff accelerates (Medicare cuts in budget deal?), $140 stop triggers. Probability: 20% in next 2 weeks. Impact: small (-$7 loss). Mitigation: hard stop in place, rotate proceeds to XLP.</li>
+</ol>
+<p><strong>Uncomfortable questions:</strong></p>
+<ul>
+<li>Is XOM at $159 the top? It's at the edge of entry range — are you chasing momentum?</li>
+<li>What if NVDA rips at GTC and you own zero tech growth?</li>
+<li>XLV has gone from -0.7% to -1.6% in 3 days — is the thesis breaking slowly?</li>
+</ul>
+<h2>Chief's Corner</h2>
+<p>Pavlo, posture: <strong>defensive with energy tilt, cash loaded, waiting for FOMC.</strong></p>
+<p>Your portfolio is up +1.4% while VOO is down ~0.9%. Alpha of +2.3% in 8 days. The defensive positioning is doing exactly what it's supposed to do.</p>
+<p>Today is simple: <strong>do nothing until 9 PM your time.</strong> Powell speaks, dot plot drops, markets react. You have all of Thursday and Friday to process. Your plan to wait 2-3 days is the right call — even more so now with war escalation and VIX settling.</p>
+<p>One concern: XOM has crept to $158.81, near the top of the entry range. If it gaps above $162 after FOMC, you may need to either chase slightly or reduce size. Don't stress about it now — wait for FOMC.</p>
+<h2>Gut Check</h2>
+<div class="callout callout-warning">
+<span class="callout-label">Behavioral Check</span>
+<p><strong>STAY THE COURSE</strong></p>
+<p>VIX 21.6. Your portfolio is green. War is escalating but markets are calm. This is the weirdest part — scary headlines but steady prices. That means the market has priced in the war.</p>
+<p>Tonight Powell speaks. He might scare you. He might bore you. Either way, you have a plan for each outcome. That's the whole point of this system — you made decisions with a clear head on Sunday, not in the heat of a Wednesday afternoon.</p>
+<p>Don't change anything because of today's headlines. Check back Thursday morning.</p>
+</div>
+<h2>Alert Conditions</h2>
+<div class="callout callout-info">
+<span class="callout-label">Watch List</span>
+<ol>
+<li><strong>WTI oil above $100 for 2 consecutive days</strong> &rarr; flash alert, consider XOM tranche early</li>
+<li><strong>VIX above 35</strong> &rarr; flash report, pause all new buys</li>
+<li><strong>XLV breaks below $140</strong> &rarr; SELL XLV, rotate to XLP</li>
+<li><strong>Ceasefire announced</strong> &rarr; cancel remaining XOM buys, pivot to growth (QQQ or XLK)</li>
+</ol>
+</div>
+<h2>Price Verification</h2>
+<pre><code>PRICE VERIFICATION:
+XOM  — Verified: $158.81 | Entry: $156-162 | Gap: 0%   | PASS
+XLU  — Verified: $47.13  | Entry: $46-48   | Gap: 0%   | PASS
+LMT  — Verified: $645.20 | Entry: $640-655 | Gap: 0%   | PASS
+XLP  — Verified: $84.70  | Entry: $83-86   | Gap: 0%   | PASS
+ALL PRICES VERIFIED</code></pre>
+<h2>Bottom Line</h2>
+<p>Wait for FOMC at 9 PM Kyiv time tonight. Your portfolio is up +1.4%, beating the market by +2.3%. XOM thesis just got stronger (war escalating), GOOGL popped +1.9%, XLE at 52-wk high. Deploy $3,600 across XOM/XLU/LMT/XLP when you're ready post-FOMC. Keep $900 cash. The plan is working — stay patient.</p>
+<p><em>Disclaimer: This report is for educational purposes only. It is not financial advice. Pavlo makes his own investment decisions. Past performance of this system does not guarantee future results.</em></p>
+<div class="footer">
+    Vault Research Desk &mdash; 2026-03-18 10:46
+</div>
+</div>
+</body>
+</html>

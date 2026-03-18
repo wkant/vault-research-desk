@@ -90,7 +90,7 @@ Label: FEAR / GREED / NEUTRAL. And whether it's a contrarian signal or not.
 | Day | Event | Why It Matters |
 Only events that could actually move prices. 5 max.
 
-### 7. Portfolio Context (if portfolio.md has holdings)
+### 7. Portfolio Context (if DB has holdings)
 For each holding: is the current environment helping or hurting this position? One sentence each.
 
 ---

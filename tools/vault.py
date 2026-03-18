@@ -166,6 +166,9 @@ def cmd_portfolio(args):
                 )
 
             print(f"  Added: {ticker} — {shares} shares @ ${cost:.2f}")
+            with VaultDB() as db:
+                db.export_portfolio_md()
+            print(f"  portfolio.md auto-synced from DB")
             return
 
         # vault portfolio remove TICKER
@@ -173,7 +176,9 @@ def cmd_portfolio(args):
             ticker = args[1].upper()
             with VaultDB() as db:
                 db.remove_holding(ticker)
+                db.export_portfolio_md()
             print(f"  Removed: {ticker}")
+            print(f"  portfolio.md auto-synced from DB")
             return
 
         # vault portfolio update TICKER SHARES COST
@@ -194,6 +199,9 @@ def cmd_portfolio(args):
                     print(f"  {ticker} not found. Use: vault portfolio add {ticker} SHARES COST")
                     return
             print(f"  Updated: {ticker} — {shares} shares @ ${cost:.2f}")
+            with VaultDB() as db:
+                db.export_portfolio_md()
+            print(f"  portfolio.md auto-synced from DB")
             return
 
         # vault portfolio cash AMOUNT
@@ -201,7 +209,9 @@ def cmd_portfolio(args):
             amount = float(args[1].replace('$', '').replace(',', ''))
             with VaultDB() as db:
                 db.set_cash(amount)
+                db.export_portfolio_md()
             print(f"  Cash updated: ${amount:,.2f}")
+            print(f"  portfolio.md auto-synced from DB")
             return
 
     # Default: show portfolio
@@ -805,12 +815,14 @@ def cmd_convert(args):
     print(f"Converted {ticker}:")
     print(f"  Price: ${result['price']:.2f}")
     print(f"  Shares: {shares}")
-    if result['from_watchlist']:
+    if result['from_watchlist'] and result['rec_price']:
         print(f"  Was on watchlist at ${result['rec_price']:.2f}")
         gain = (price - result['rec_price']) / result['rec_price'] * 100
         print(f"  Entry vs recommendation: {gain:+.1f}%")
+    elif result['from_watchlist']:
+        print(f"  Was on watchlist (no rec price recorded)")
     print(f"  Trade logged in vault.db")
-    print(f"  Remember to update portfolio.md!")
+    print(f"  Add to portfolio: vault portfolio add {ticker} SHARES PRICE")
 
 
 def cmd_journal(args):
@@ -1252,24 +1264,29 @@ def cmd_flow_start(args):
     print()
 
     # 1. Morning briefing
-    print("  STEP 1/4: Morning Briefing")
+    print("  STEP 1/5: Morning Briefing")
     print(f"  {'─' * 50}")
     cmd_morning()
 
     # 2. Check plan
-    print("\n  STEP 2/4: Active Plan")
+    print("\n  STEP 2/5: Active Plan")
     print(f"  {'─' * 50}")
     cmd_plan(None)
 
     # 3. News vs theses
-    print("  STEP 3/4: News Impact Check")
+    print("  STEP 3/5: News Impact Check")
     print(f"  {'─' * 50}")
     cmd_news_impact(['3'])
 
     # 4. Regime
-    print("  STEP 4/4: Market Regime")
+    print("  STEP 4/5: Market Regime")
     print(f"  {'─' * 50}")
     cmd_regime(None)
+
+    # 5. Alerts
+    print("  STEP 5/5: Alert Check")
+    print(f"  {'─' * 50}")
+    run_tool("alerts.py")
 
     print(f"{'=' * 55}")
     print("  WHAT NEXT:")
@@ -1305,7 +1322,7 @@ def cmd_flow_buy(args):
             WHERE ticker=? AND status='ACTIVE'
             ORDER BY date DESC LIMIT 1
         """, (ticker,)).fetchone()
-        if wl and wl['conviction']:
+        if wl is not None and wl['conviction']:
             conviction = wl['conviction']
         else:
             thesis = db.conn.execute("""
@@ -1313,7 +1330,7 @@ def cmd_flow_buy(args):
                 WHERE ticker=? AND status='ACTIVE'
                 ORDER BY date_opened DESC LIMIT 1
             """, (ticker,)).fetchone()
-            if thesis and thesis['conviction']:
+            if thesis is not None and thesis['conviction']:
                 conviction = thesis['conviction']
 
     # Check market status
@@ -1330,7 +1347,7 @@ def cmd_flow_buy(args):
     print()
 
     # 1. Position sizing (with conviction from report)
-    print("  STEP 1/4: Position Sizing")
+    print("  STEP 1/5: Position Sizing")
     print(f"  {'─' * 50}")
     size_args = [ticker, conviction]
     if amount:
@@ -1339,20 +1356,25 @@ def cmd_flow_buy(args):
 
     # 2. Simulate
     if amount:
-        print("  STEP 2/4: Portfolio Simulation")
+        print("  STEP 2/5: Portfolio Simulation")
         print(f"  {'─' * 50}")
         cmd_simulate([ticker, str(amount)])
     else:
-        print("  STEP 2/4: Simulation (skipped — add amount for simulation)")
+        print("  STEP 2/5: Simulation (skipped — add amount for simulation)")
         print()
 
     # 3. Smart money check
-    print("  STEP 3/4: Smart Money Check")
+    print("  STEP 3/5: Smart Money Check")
     print(f"  {'─' * 50}")
     run_tool("db.py", ["smart-money", ticker])
 
-    # 4. News
-    print("\n  STEP 4/4: Recent News")
+    # 4. Correlation check
+    print("\n  STEP 4/5: Correlation Check")
+    print(f"  {'─' * 50}")
+    run_tool("correlation.py", ["--add", ticker])
+
+    # 5. News
+    print("\n  STEP 5/5: Recent News")
     print(f"  {'─' * 50}")
     run_tool("news.py", [ticker])
 
@@ -1366,7 +1388,7 @@ def cmd_flow_buy(args):
 
 
 def cmd_flow_post_trade(args):
-    """Post-trade flow: log → journal → score → drift."""
+    """Post-trade flow: log → update DB → journal → score → drift."""
     if not args or len(args) < 3:
         print("Usage: vault post-trade TICKER PRICE SHARES")
         print("  Example: vault post-trade XOM 156.12 5")
@@ -1374,8 +1396,10 @@ def cmd_flow_post_trade(args):
 
     ticker = args[0].upper()
     try:
-        price = str(float(args[1].replace('$', '')))
-        shares = str(float(args[2]))
+        price_f = float(args[1].replace('$', ''))
+        shares_f = float(args[2])
+        price = str(price_f)
+        shares = str(shares_f)
     except ValueError:
         print(f"  Error: price and shares must be numbers")
         print(f"  Example: vault post-trade XOM 156.12 5")
@@ -1388,28 +1412,174 @@ def cmd_flow_post_trade(args):
     print()
 
     # 1. Log the trade
-    print("  STEP 1/4: Logging Trade")
+    print("  STEP 1/5: Logging Trade")
     print(f"  {'─' * 50}")
     cmd_convert([ticker, price, shares])
 
-    # 2. Journal prompt
-    print("\n  STEP 2/4: Trade Journal")
+    # 2. Update holdings DB + auto-export portfolio.md
+    print(f"\n  STEP 2/5: Updating Holdings DB")
+    print(f"  {'─' * 50}")
+    sys.path.insert(0, SCRIPT_DIR)
+    from db import VaultDB
+    with VaultDB() as db:
+        existing = db.get_holding(ticker)
+        if existing:
+            # Add to existing position (average up/down)
+            old_shares = existing['shares']
+            old_cost = existing['cost_basis']
+            new_shares = old_shares + shares_f
+            new_cost = (old_shares * old_cost + shares_f * price_f) / new_shares
+            db.upsert_holding(
+                ticker=ticker, shares=new_shares, cost_basis=round(new_cost, 4),
+                date_bought=existing['date_bought'],
+                sector=existing['sector'],
+                asset_type=existing['asset_type']
+            )
+            print(f"  Updated: {ticker} — {old_shares} → {new_shares} shares (avg cost ${new_cost:.2f})")
+        else:
+            db.upsert_holding(ticker=ticker, shares=shares_f, cost_basis=price_f)
+            print(f"  Added: {ticker} — {shares_f} shares @ ${price_f:.2f}")
+        db.export_portfolio_md()
+    print(f"  portfolio.md auto-synced from DB")
+
+    # 3. Journal prompt
+    print(f"\n  STEP 3/5: Trade Journal")
     print(f"  {'─' * 50}")
     print(f"  Add a reflection later: vault journal {ticker} \"why I bought this\"")
     print()
 
-    # 3. Updated scorecard
-    print("  STEP 3/4: Updated Scorecard")
+    # 4. Updated scorecard
+    print("  STEP 4/5: Updated Scorecard")
     print(f"  {'─' * 50}")
     run_tool("scorer.py")
 
-    # 4. New drift check
-    print("\n  STEP 4/4: Portfolio Drift After Trade")
+    # 5. New drift check
+    print(f"\n  STEP 5/5: Portfolio Drift After Trade")
     print(f"  {'─' * 50}")
     cmd_drift(None)
 
     print(f"{'=' * 55}")
-    print("  REMINDER: Update portfolio.md with the new position!")
+    print(f"  POST-TRADE COMPLETE — {ticker} position updated")
+    print(f"{'=' * 55}")
+    print()
+
+
+def cmd_flow_sell(args):
+    """Sell flow: show position → log SELL → update/remove holding → close thesis → drift."""
+    if not args or len(args) < 2:
+        print("Usage: vault sell-flow TICKER SELL_PRICE [SHARES]")
+        print("  Example: vault sell-flow XOM 170.50       (full sell)")
+        print("  Example: vault sell-flow XOM 170.50 3     (partial sell)")
+        return
+
+    ticker = args[0].upper()
+    try:
+        sell_price = float(args[1].replace('$', ''))
+    except ValueError:
+        print(f"  Error: sell price must be a number")
+        return
+
+    sys.path.insert(0, SCRIPT_DIR)
+    from db import VaultDB
+    from datetime import date as d
+
+    with VaultDB() as db:
+        holding = db.get_holding(ticker)
+
+    if not holding:
+        print(f"  Error: {ticker} not found in holdings")
+        return
+
+    held_shares = holding['shares']
+    cost_basis = holding['cost_basis']
+
+    # Determine shares to sell
+    if len(args) >= 3:
+        try:
+            shares_to_sell = float(args[2])
+        except ValueError:
+            print(f"  Error: shares must be a number")
+            return
+        if shares_to_sell > held_shares:
+            print(f"  Error: trying to sell {shares_to_sell} but only hold {held_shares} shares")
+            return
+    else:
+        shares_to_sell = held_shares  # full sell
+
+    is_full_sell = (shares_to_sell >= held_shares)
+    pnl_per_share = sell_price - cost_basis
+    pnl_dollar = pnl_per_share * shares_to_sell
+    pnl_pct = (sell_price - cost_basis) / cost_basis * 100
+
+    print()
+    print(f"{'=' * 55}")
+    print(f"  SELL FLOW — {ticker}")
+    print(f"{'=' * 55}")
+    print()
+
+    # 1. Show current position
+    print("  STEP 1/5: Current Position")
+    print(f"  {'─' * 50}")
+    print(f"  Shares held:  {held_shares}")
+    print(f"  Cost basis:   ${cost_basis:.2f}")
+    print(f"  Sell price:   ${sell_price:.2f}")
+    print(f"  Selling:      {shares_to_sell} shares ({'FULL' if is_full_sell else 'PARTIAL'})")
+    print(f"  P&L:          ${pnl_dollar:+,.2f} ({pnl_pct:+.1f}%)")
+    print()
+
+    # 2. Log the SELL trade
+    print("  STEP 2/5: Logging SELL Trade")
+    print(f"  {'─' * 50}")
+    with VaultDB() as db:
+        db.add_trade(
+            date=d.today().isoformat(),
+            ticker=ticker, action='SELL',
+            entry_price=sell_price,
+            status='CLOSED',
+            notes=f"Sold {shares_to_sell} shares @ ${sell_price:.2f} (cost ${cost_basis:.2f}, P&L {pnl_pct:+.1f}%)",
+        )
+        # Close the open BUY trade for this ticker
+        db.close_trade(ticker, exit_price=sell_price, return_pct=round(pnl_pct, 2))
+    print(f"  SELL logged: {shares_to_sell} shares @ ${sell_price:.2f}")
+
+    # 3. Update or remove holding
+    print(f"\n  STEP 3/5: Updating Holdings")
+    print(f"  {'─' * 50}")
+    with VaultDB() as db:
+        if is_full_sell:
+            db.remove_holding(ticker)
+            print(f"  Removed {ticker} from holdings (full sell)")
+        else:
+            remaining = held_shares - shares_to_sell
+            db.upsert_holding(
+                ticker=ticker, shares=remaining, cost_basis=cost_basis,
+                date_bought=holding['date_bought'],
+                sector=holding['sector'],
+                asset_type=holding['asset_type']
+            )
+            print(f"  Updated {ticker}: {held_shares} → {remaining} shares")
+        db.export_portfolio_md()
+    print(f"  portfolio.md auto-synced from DB")
+
+    # 4. Close thesis (full sell only)
+    print(f"\n  STEP 4/5: Thesis Update")
+    print(f"  {'─' * 50}")
+    if is_full_sell:
+        with VaultDB() as db:
+            db.close_thesis(ticker, reason=f"Position sold @ ${sell_price:.2f} ({pnl_pct:+.1f}%)")
+        print(f"  Thesis for {ticker} closed")
+    else:
+        print(f"  Partial sell — thesis remains active")
+
+    # 5. Drift check
+    print(f"\n  STEP 5/5: Portfolio Drift After Sell")
+    print(f"  {'─' * 50}")
+    cmd_drift(None)
+
+    print(f"{'=' * 55}")
+    sell_type = "FULLY SOLD" if is_full_sell else f"PARTIAL SELL ({held_shares - shares_to_sell} remaining)"
+    print(f"  {ticker} — {sell_type}")
+    print(f"  Realized P&L: ${pnl_dollar:+,.2f} ({pnl_pct:+.1f}%)")
     print(f"{'=' * 55}")
     print()
 
@@ -1472,27 +1642,37 @@ def cmd_flow_review(args):
     print()
 
     # 1. Performance
-    print("  STEP 1/5: Performance Scorecard")
+    print("  STEP 1/7: Performance Scorecard")
     print(f"  {'─' * 50}")
     run_tool("scorer.py")
 
     # 2. Drift
-    print("\n  STEP 2/5: Portfolio Drift")
+    print("\n  STEP 2/7: Portfolio Drift")
     print(f"  {'─' * 50}")
     cmd_drift(None)
 
-    # 3. Regime
-    print("  STEP 3/5: Market Regime")
+    # 3. Alerts
+    print("  STEP 3/7: Alert Check")
+    print(f"  {'─' * 50}")
+    run_tool("alerts.py")
+
+    # 4. Backtest
+    print("\n  STEP 4/7: Backtest Summary")
+    print(f"  {'─' * 50}")
+    cmd_backtest(None)
+
+    # 5. Regime
+    print("  STEP 5/7: Market Regime")
     print(f"  {'─' * 50}")
     cmd_regime(None)
 
-    # 4. Peers
-    print("  STEP 4/5: Peer Comparison")
+    # 6. Peers
+    print("  STEP 6/7: Peer Comparison")
     print(f"  {'─' * 50}")
     cmd_peers(None)
 
-    # 5. Projection
-    print("  STEP 5/5: Investment Projection")
+    # 7. Projection
+    print("  STEP 7/7: Investment Projection")
     print(f"  {'─' * 50}")
     cmd_project(None)
 
@@ -1611,8 +1791,10 @@ def cmd_help():
     print("  VAULT RESEARCH DESK — Command Reference")
     print("=" * 55)
     print()
-    print("  Daily:")
+    print("  Quick Checks:")
+    print("    vault status             One-line portfolio status")
     print("    vault morning            Full overview (start here)")
+    print("    vault plan               Show current action plan from notes/")
     print("    vault changes            What moved since last report")
     print("    vault alerts             Check alert thresholds")
     print("    vault score              Performance scorecard")
@@ -1624,6 +1806,7 @@ def cmd_help():
     print("    vault screen             S&P 500 screener")
     print("    vault screen --sample 50 Quick scan (50 random tickers)")
     print("    vault news GOOGL         News for specific tickers")
+    print("    vault news-impact        News contradicting active theses")
     print()
     print("  Analysis:")
     print("    vault insider GOOGL      Check insider activity")
@@ -1634,8 +1817,16 @@ def cmd_help():
     print("    vault theses             Show active investment theses")
     print("    vault peers              Compare portfolio to top investors")
     print("    vault backtest           Backtest closed trade history")
+    print("    vault project            5-year investment projector")
+    print("    vault project 6000 10    Custom: $6K/mo, 10 years")
     print()
     print("  Portfolio:")
+    print("    vault portfolio          Show holdings + P&L + market status")
+    print("    vault portfolio add XOM 5 156.12 2026-03-18")
+    print("    vault portfolio update GOOGL 1.5 305")
+    print("    vault portfolio remove CFG")
+    print("    vault portfolio cash 4500")
+    print("    vault portfolio export   Regenerate portfolio.md from DB")
     print("    vault drift              Allocation drift analysis")
     print("    vault size TICKER [***]  Position sizing calculator")
     print("    vault simulate T1 $X ... Simulate adding new positions")
@@ -1657,11 +1848,13 @@ def cmd_help():
     print("    vault help               This help")
     print()
     print("  Flows (smart pipelines):")
-    print("    vault start              Morning startup (briefing + plan + news + regime)")
-    print("    vault buy-flow XOM 600   Pre-trade (size + simulate + smart money + news)")
+    print("    vault start              Morning startup (briefing + plan + news + regime + alerts)")
+    print("    vault buy-flow XOM 600   Pre-trade (size + simulate + smart money + correlation + news)")
     print("    vault post-trade XOM 156 5  After buying (log + score + drift)")
     print("    vault research-flow NVDA Deep research (data + smart money + insider + news)")
-    print("    vault review             End-of-week (score + drift + regime + peers + project)")
+    print("    vault review             End-of-week (score + drift + alerts + backtest + regime + peers + project)")
+    print()
+    print("  Aliases: m=morning, s=score, a=alerts, n=news, c=changes, h=help, p=portfolio")
     print()
     print("  Tip: Start each day with `vault start`")
     print()
@@ -1710,6 +1903,7 @@ COMMANDS = {
     "start":         lambda args: cmd_flow_start(args),
     "buy-flow":      lambda args: cmd_flow_buy(args),
     "post-trade":    lambda args: cmd_flow_post_trade(args),
+    "sell-flow":     lambda args: cmd_flow_sell(args),
     "research-flow": lambda args: cmd_flow_research(args),
     "review":        lambda args: cmd_flow_review(args),
     "audit":       lambda args: cmd_audit(args),
@@ -1732,6 +1926,10 @@ def main():
 
     command = sys.argv[1].lower()
     args = sys.argv[2:] if len(sys.argv) > 2 else None
+
+    if command in ('--help', '-h'):
+        cmd_help()
+        return
 
     if command in COMMANDS:
         COMMANDS[command](args)

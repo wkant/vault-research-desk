@@ -1071,8 +1071,8 @@ class VaultDB:
                 """, (t.get('date', ''), t.get('fund', ''), t.get('ticker', ''),
                       t.get('company', ''), t.get('direction', ''),
                       t.get('shares'), t.get('etf_percent'), now))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  Warning: cache_ark_trades insert failed: {e}")
         self.conn.commit()
 
     def get_ark_trades(self, days=30, ticker=None, direction=None):
@@ -1122,8 +1122,8 @@ class VaultDB:
                       h.get('pct_portfolio'), h.get('activity', ''),
                       h.get('shares'), h.get('value'), h.get('reported_price'),
                       quarter, now))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  Warning: cache_guru_holdings insert failed: {e}")
         self.conn.commit()
 
     def get_guru_holdings(self, guru_code=None, ticker=None):
@@ -1169,8 +1169,8 @@ class VaultDB:
                       a.get('source', ''), a.get('url', ''),
                       a.get('published', ''), a.get('category', 'company'),
                       a.get('sentiment'), now))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  Warning: cache_news insert failed: {e}")
         self.conn.commit()
 
     def get_cached_news(self, ticker, max_age_minutes=60, limit=20):
@@ -1486,7 +1486,6 @@ class VaultDB:
             )
         """)
         self.conn.commit()
-        self.conn.commit()
 
     def get_learnings_summary(self):
         """Formatted summary for report consumption.
@@ -1660,17 +1659,21 @@ class VaultDB:
         """, (limit,)).fetchall()
 
     def portfolio_dashboard(self):
-        """One-shot portfolio overview: holdings + current prices + P&L."""
+        """One-shot portfolio overview: holdings + current prices + P&L.
+        Only uses cached prices fetched within the last 24 hours (1440 min).
+        Stale/missing prices fall back to cost_basis; a 'stale' flag is set."""
         return self.conn.execute("""
             SELECT h.ticker, h.shares, h.cost_basis, h.asset_type, h.date_bought,
-                   p.price as current_price,
-                   round((p.price - h.cost_basis) / h.cost_basis * 100, 2) as pnl_pct,
-                   round(h.shares * p.price, 2) as market_value,
-                   round(h.shares * (p.price - h.cost_basis), 2) as pnl_dollar,
-                   t.rsi, t.dma_50, t.dma_200
+                   COALESCE(fresh_p.price, h.cost_basis) as current_price,
+                   round((COALESCE(fresh_p.price, h.cost_basis) - h.cost_basis) / h.cost_basis * 100, 2) as pnl_pct,
+                   round(h.shares * COALESCE(fresh_p.price, h.cost_basis), 2) as market_value,
+                   round(h.shares * (COALESCE(fresh_p.price, h.cost_basis) - h.cost_basis), 2) as pnl_dollar,
+                   t.rsi, t.dma_50, t.dma_200,
+                   CASE WHEN fresh_p.price IS NULL THEN 1 ELSE 0 END as stale
             FROM holdings h
-            LEFT JOIN price_cache p ON h.ticker = p.ticker
-                AND p.date = (SELECT max(date) FROM price_cache WHERE ticker=h.ticker)
+            LEFT JOIN price_cache fresh_p ON h.ticker = fresh_p.ticker
+                AND fresh_p.date = (SELECT max(date) FROM price_cache WHERE ticker=h.ticker)
+                AND (julianday('now') - julianday(fresh_p.fetched_at)) * 1440 <= 1440
             LEFT JOIN technicals_cache t ON h.ticker = t.ticker
                 AND t.date = (SELECT max(date) FROM technicals_cache WHERE ticker=h.ticker)
             ORDER BY market_value DESC
@@ -2038,7 +2041,10 @@ class VaultDB:
         lines.append(f"  {'─' * 52}")
         if theses:
             for t in theses[:8]:
-                age = (now.date() - datetime.strptime(t['date_opened'], '%Y-%m-%d').date()).days
+                try:
+                    age = (now.date() - datetime.strptime(t['date_opened'], '%Y-%m-%d').date()).days
+                except (ValueError, TypeError):
+                    continue
                 stale = " STALE" if age > 90 else ""
                 direction = t['direction'] if 'direction' in t.keys() else '?'
                 lines.append(f"  {t['ticker']:<7} {direction:<6} {age:>3}d  {t['thesis'][:35]}{stale}")
@@ -2161,7 +2167,10 @@ class VaultDB:
             return "No reports found. Run `report` to generate your first one."
 
         report_date = last_report['date']
-        days_since = (now.date() - datetime.strptime(report_date, '%Y-%m-%d').date()).days
+        try:
+            days_since = (now.date() - datetime.strptime(report_date, '%Y-%m-%d').date()).days
+        except (ValueError, TypeError):
+            days_since = 0
 
         lines.append("")
         lines.append(f"{'=' * 58}")
@@ -2217,7 +2226,7 @@ class VaultDB:
                 ("10Y", old_snap['ten_year'], new_snap['ten_year']),
             ]
             for name, old_val, new_val in macro_items:
-                if old_val and new_val:
+                if old_val is not None and new_val is not None and old_val != 0:
                     chg = (new_val - old_val) / old_val * 100
                     direction = "+" if chg >= 0 else ""
                     lines.append(f"  {name:<10} {old_val:>8.2f} -> {new_val:>8.2f}  ({direction}{chg:.1f}%)")
@@ -2410,14 +2419,8 @@ class VaultDB:
             ORDER BY date DESC LIMIT 1
         """, (ticker,)).fetchone()
 
-        if wl:
-            self.conn.execute(
-                "UPDATE watchlist SET status='CONVERTED' WHERE id=?",
-                (wl['id'],)
-            )
-
         # Add trade
-        self.add_trade(
+        trade_added = self.add_trade(
             date=today,
             ticker=ticker,
             action='BUY',
@@ -2426,7 +2429,13 @@ class VaultDB:
             status='OPEN',
             notes=f"Converted from watchlist (rec'd ${wl['price_at_rec']:.2f})" if wl and wl['price_at_rec'] else "Manual entry",
         )
-        self.conn.commit()
+
+        if wl and trade_added:
+            self.conn.execute(
+                "UPDATE watchlist SET status='CONVERTED' WHERE id=?",
+                (wl['id'],)
+            )
+            self.conn.commit()
 
         return {
             'ticker': ticker,

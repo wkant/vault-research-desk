@@ -307,6 +307,7 @@ def cross_reference_portfolio(db) -> list:
         relevance = "HOLDING" if ticker in portfolio_tickers else "WATCHLIST"
 
         # 1. Institutional 13F consensus
+        holders = []
         holders = db.ticker_held_by(ticker)
         if holders:
             fund_names = [h["fund"] for h in holders]

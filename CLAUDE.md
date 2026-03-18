@@ -89,7 +89,7 @@ python3 tools/vault.py help             # Full command reference
 ```
 vault_research_desk/
 ├── CLAUDE.md                  ← You are here
-├── portfolio.md               ← SINGLE SOURCE OF TRUTH (auto-synced from DB)
+├── portfolio.md               ← Auto-generated export from DB (not the source of truth)
 │
 ├── system/                    ← Analysis pipeline
 │   ├── 00_system.md           ← Master rules, execution flow, sizing priority
@@ -196,22 +196,25 @@ with VaultDB() as db:
     db.generate_report_skeleton()      # Pre-filled report draft
 ```
 
-## Auto-Learned Rules (updated by self-analyze)
-Embedded in system files as AUTO-FIX and PRO-INSIGHT patches:
-- **VERIFICATION REMINDER** (01_research.md): Data citation required
-- **SELL CHECK** (02_strategy.md): Buy bias correction
-- **REPETITION GUARD** (02_strategy.md): No re-recommending bought stocks
-- **CONCENTRATION BLOCKERS** (03_devils_gate.md): Auto-detected position limits
-- **SECTOR BLOCKERS** (03_devils_gate.md): Auto-detected sector limits
-- **STOP-LOSS ENFORCEMENT** (04_report.md): Meaningful levels required
-- **CONVICTION SIZING** (00_system.md): *** up to 18%, ** 12%, * 7%
-- **BUSINESS CYCLE MAPPING** (01_research.md): Sector rotation by cycle
-- **SMART MONEY VALIDATION** (02_strategy.md): 13F + guru + ARK + insider check
-- **SMART MONEY CHALLENGE** (03_devils_gate.md): Devil's Gate smart money test
-- **PORTFOLIO-LEVEL RISK** (05_position_mgmt.md): Drawdown circuit breaker
+<!-- AUTO-FIX: LEARNED RULES -->
+## Auto-Learned Rules (updated 2026-03-17 by self-analyze)
+The system has learned these rules from analyzing reports, trades, and pro data.
+They are embedded in system files as AUTO-FIX and PRO-INSIGHT patches.
 
-Patches auto-refresh during `vault preflight` (runs self_analyze.py).
+- **VERIFICATION REMINDER** (01_research.md): DATA CITATION RULE (auto-added by self-analyze):
+- **SELL CHECK** (02_strategy.md): SELL/TRIM CHECK (auto-added by self-analyze):
+- **REPETITION GUARD** (02_strategy.md): REPETITION GUARD (auto-added by self-analyze):
+- **CONCENTRATION BLOCKERS** (03_devils_gate.md): Auto-detected concentration blockers (from self-analyze):
+- **SECTOR BLOCKERS** (03_devils_gate.md): Auto-detected sector concentration (from self-analyze):
+- **STOP-LOSS ENFORCEMENT** (04_report.md): STOP-LOSS RULE (auto-added by self-analyze):
+- **SECTION CHECKLIST** (04_report.md): SECTION CHECKLIST (auto-added by self-analyze):
+- **CONVICTION SIZING** (00_system.md): learned from pro analysis
+- **BUSINESS CYCLE MAPPING** (01_research.md): learned from pro analysis
+- **SMART MONEY VALIDATION** (02_strategy.md): learned from pro analysis
+- **SMART MONEY CHALLENGE** (03_devils_gate.md): learned from pro analysis
+- **PORTFOLIO-LEVEL RISK** (05_position_mgmt.md): learned from pro analysis
 
+<!-- END LEARNED RULES -->
 ## Don't
 - Don't hardcode investor data in system files — read from DB via `vault portfolio`
 - Don't fabricate sentiment indicators you can't verify

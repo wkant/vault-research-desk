@@ -1,7 +1,7 @@
 # Vault Research Desk — System Rules
 
 ## What This Is
-A personal investment research system. It produces weekly market reports with BUY/HOLD/SELL calls, risk assessment, and behavioral coaching. The investor's profile, broker, risk tolerance, and monthly investment are defined in `portfolio.md` — the system reads them from there. Nothing is hardcoded.
+A personal investment research system. It produces weekly market reports with BUY/HOLD/SELL calls, risk assessment, and behavioral coaching. The investor's profile, broker, risk tolerance, and monthly investment are stored in `vault.db` — the system reads them from there via `vault portfolio`. Nothing is hardcoded.
 
 ---
 
@@ -128,13 +128,15 @@ CANNOT verify (don't fabricate):
 
 ## Position Sizing Framework
 
-Based on portfolio.md risk tolerance setting:
+Based on vault.db risk tolerance setting:
 
 | Risk Level | Stocks | Cash | Max Speculative |
 |-----------|--------|------|-----------------|
 | Conservative | 50% | 25-30% | 3% |
 | Moderate | 65-75% | 15-20% | 5% |
 | Aggressive | 80%+ | 5-10% | 10% |
+
+Hard minimum cash for all risk levels: 10%. Target ranges above are guidelines.
 
 ### Hard Limits (non-negotiable)
 - No single stock >15% of total portfolio (see conviction exception below)

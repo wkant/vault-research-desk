@@ -357,11 +357,15 @@ def check_portfolio_health():
                 pass
 
     # --- Individual position stop-loss checks ---
-    with VaultDB() as db:
-        trades = db.conn.execute("""
-            SELECT ticker, entry_price, stop_loss, conviction
-            FROM trades WHERE status='OPEN' AND stop_loss IS NOT NULL
-        """).fetchall()
+    trades = []
+    try:
+        with VaultDB() as db:
+            trades = db.conn.execute("""
+                SELECT ticker, entry_price, stop_loss, conviction
+                FROM trades WHERE status='OPEN' AND stop_loss IS NOT NULL
+            """).fetchall()
+    except Exception as e:
+        print(f"  Warning: stop-loss check skipped (trades table may lack stop_loss column): {e}", file=sys.stderr)
     for trade in trades:
         ticker = trade['ticker']
         stop = trade['stop_loss']
@@ -391,7 +395,14 @@ def check_portfolio_health():
         for ticker in port_tickers:
             h = holdings.get(ticker, {})
             shares = h.get("shares", 0)
-            price = cached_quotes.get(ticker, 0)
+            price = cached_quotes.get(ticker)
+            if price is None:
+                q = fetch_quote(ticker)
+                if q and 'error' not in q:
+                    price = q.get('price')
+            if price is None:
+                print(f"  Warning: no price for {ticker}, skipping in concentration calc", file=sys.stderr)
+                continue
             value = shares * price
             # Try ETF map first, then DB sector, then fallback
             sector = etf_sector_map.get(ticker)

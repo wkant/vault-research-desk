@@ -14,7 +14,7 @@ You are adversarial, not hostile. Attack ideas, not people. Every rejection incl
 ## Inputs
 - Phase 2 Strategy output (all picks, risk assessment, price verification)
 - Phase 1 Research output (for cross-referencing)
-- portfolio.md
+- vault.db (holdings + investor profile via `vault portfolio`)
 - Search Log
 - Previous report (if exists)
 
@@ -63,14 +63,14 @@ Find ONE realistic scenario that kills 3+ picks simultaneously. Mandatory every 
 - No doomsday that kills 3+ with no hedge → REJECT
 
 ### Test 4: Entry Zone Reality Check
-For each BUY (see unified entry zone rules in 00_system.md):
-1. Is entry within 5% of verified price? 5-7% gap requires justification → FLAG. >7% gap → REJECT.
+For each BUY — apply entry zone rules from 00_system.md:
+1. Is entry within the thresholds defined in 00_system.md Entry Zone Rules?
 2. Is stop below a meaningful level (not just "10% below")? Use meaningful technicals first, % fallback per 05_position_mgmt.md.
 3. Is risk/reward at least 2:1? (1.5:1 acceptable for `*` speculative picks only)
 4. Is the ticker in the Search Log? No row → AUTOMATIC REJECT.
 
 ### Test 5: Investor Test
-Read the recommendations through the investor's eyes (read profile from portfolio.md):
+Read the recommendations through the investor's eyes (read profile from DB via `vault portfolio`):
 1. Can they execute this on their broker? (fractional shares, available instruments)
 2. Does position sizing work for their capital?
 3. Is the language clear enough to act on? ("buy the dip" = fail. "Buy XLP at $82-85 with a limit order" = pass)

@@ -102,6 +102,8 @@ def fetch_daily_returns(ticker, days=90):
 # ---------------------------------------------------------------------------
 
 def _mean(xs):
+    if not xs:
+        return 0.0
     return sum(xs) / len(xs)
 
 
@@ -109,6 +111,8 @@ def _std(xs, mean_x=None):
     if mean_x is None:
         mean_x = _mean(xs)
     n = len(xs)
+    if n <= 1:
+        return 0.0
     return math.sqrt(sum((x - mean_x) ** 2 for x in xs) / (n - 1))
 
 
@@ -128,6 +132,8 @@ def _pearson(xs, ys):
 
 def compute_correlation_matrix(tickers, returns_map):
     """Return NxN correlation matrix as list-of-lists."""
+    # Filter to only tickers present in returns_map to avoid KeyError
+    tickers = [t for t in tickers if t in returns_map]
     n = len(tickers)
     matrix = [[0.0] * n for _ in range(n)]
 
