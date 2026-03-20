@@ -12,6 +12,13 @@ Translate the analysis into a report the investor can read and act on. Write lik
 - One disclaimer at the end, not scattered throughout
 - **Never skip the Gut Check section**
 
+<!-- AUTO-FIX: WORD COUNT LIMIT (updated 2026-03-20) -->
+**WORD COUNT TARGET: <2000 prose words (updated after logic audit)**
+Tables (Search Log, Portfolio, Validation Summary, Price Verification) don't count toward word limit — they're structured data. The 1500-word target was incompatible with 15 mandatory sections. Realistic target: ~2000 prose words.
+- Cut narrative filler — tables replace paragraphs where possible
+- Keep each section tight: What's Happening (5-6 sentences), Risk (2-3 bullets), Gut Check (3-4 sentences)
+- If prose exceeds 2000 words, trim before shipping
+
 ---
 
 ## Report Structure
@@ -86,19 +93,30 @@ One short paragraph. Educational purposes only. Not financial advice.
 ---
 
 
-<!-- AUTO-FIX: SECTION CHECKLIST -->
+<!-- AUTO-FIX: SECTION CHECKLIST (updated 2026-03-19) -->
 **SECTION CHECKLIST (auto-added by self-analyze):**
-Multiple reports have missing sections. Before finalizing, verify ALL sections exist:
-- [OK] What's Happening
-- [OK] Your Portfolio
-- [OK] What to Buy
-- [OK] What to Avoid
-- [OK] Biggest Risks
-- [OK] Gut Check
-- [OK] Bottom Line
-*Evidence: 4 reports with missing sections.*
+8 out of 8 early reports were missing critical sections. Before finalizing, verify ALL sections exist:
+- [ ] What's Happening
+- [ ] This Week
+- [ ] Changes Since Last Report (if not first report)
+- [ ] **Search Log** ← CRITICAL: missing in 4 reports. Every ticker needs a verified price row.
+- [ ] Your Portfolio (only if DB has holdings)
+- [ ] **SELL/TRIM evaluation** ← NEW: must appear before What to Buy
+- [ ] What to Buy
+- [ ] What to Avoid
+- [ ] **Validation Summary (Devil's Gate)** ← CRITICAL: missing in 4 reports. Must include 8-test table.
+- [ ] Biggest Risks
+- [ ] Chief's Corner
+- [ ] Gut Check
+- [ ] Alert Conditions
+- [ ] Bottom Line
+- [ ] Disclaimer
+
+**If Search Log or Validation Summary is missing → report FAILS audit. Do not ship.**
+*Evidence: reports 2026-03-11 through 2026-03-15 all missing both sections.*
 
 <!-- END SECTION CHECKLIST -->
+
 ## Devil's Gate Integration
 **The Devil's Gate summary MUST appear in the report.** Include it as a collapsed section or summary table after "What to Avoid":
 

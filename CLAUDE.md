@@ -197,26 +197,48 @@ with VaultDB() as db:
 ```
 
 <!-- AUTO-FIX: LEARNED RULES -->
-## Auto-Learned Rules (updated 2026-03-17 by self-analyze)
-The system has learned these rules from analyzing reports, trades, and pro data.
-They are embedded in system files as AUTO-FIX and PRO-INSIGHT patches.
+## Auto-Learned Rules (updated 2026-03-20, full rewrite after logic audit + blind spot fixes)
 
-- **VERIFICATION REMINDER** (01_research.md): DATA CITATION RULE (auto-added by self-analyze):
-- **SELL CHECK** (02_strategy.md): SELL/TRIM CHECK (auto-added by self-analyze):
-- **REPETITION GUARD** (02_strategy.md): REPETITION GUARD (auto-added by self-analyze):
-- **CONCENTRATION BLOCKERS** (03_devils_gate.md): Auto-detected concentration blockers (from self-analyze):
-- **SECTOR BLOCKERS** (03_devils_gate.md): Auto-detected sector concentration (from self-analyze):
-- **STOP-LOSS ENFORCEMENT** (04_report.md): STOP-LOSS RULE (auto-added by self-analyze):
-- **SECTION CHECKLIST** (04_report.md): SECTION CHECKLIST (auto-added by self-analyze):
-- **CONVICTION SIZING** (00_system.md): learned from pro analysis
-- **BUSINESS CYCLE MAPPING** (01_research.md): learned from pro analysis
-- **SMART MONEY VALIDATION** (02_strategy.md): learned from pro analysis
-- **SMART MONEY CHALLENGE** (03_devils_gate.md): learned from pro analysis
-- **PORTFOLIO-LEVEL RISK** (05_position_mgmt.md): learned from pro analysis
+### Core Logic Fixes (from logic audit 2026-03-20)
+- **CONCENTRATION vs TOTAL CAPITAL** (00_system.md, db.py): Calculate position weights against total capital (holdings + cash), NOT just holdings. Fixed in code: `risk_dashboard()`, `portfolio_drift()`, `calculate_position_size()` all use `holdings_value + cash`.
+- **FLASH SELL GUARD** (00_system.md): Flash only checks stop-losses, marks SELLs as "PRELIMINARY — confirm in next full report". No full thesis review in flash mode.
+- **SELL/TRIM with CONTEXT GUARD** (02_strategy.md): Mandatory sell evaluation before buys, BUT: new portfolio (<30 days, <6 positions) with 0 sells is normal. Oversold override: no SELL at RSI <25 unless stop hit.
+- **BALANCED MIX** (02_strategy.md): Every report considers growth + defensive + hedge + war/macro + broad market ETFs. If S&P RSI <35, VOO/SPLG must be evaluated. If strongest smart money signal is excluded, explain why.
+- **BROAD MARKET ETFs** (02_strategy.md): VOO, SPY, SPLG, VTI, QQQ always evaluated as candidates. Don't get focused on individual picks and miss the obvious.
+- **HEAD-TO-HEAD** (02_strategy.md): Every BUY must name the top alternative and explain why your pick is better.
+- **CASH → SHY/BIL** (02_strategy.md): If cash >20% and yields >4%, recommend ultra-short bond ETFs instead of uninvested cash.
+- **SECTOR ROTATION TRIGGER** (02_strategy.md): If held sector ETF in bottom 3 for 2+ reports and thesis weakened, FLAG for rotation.
+- **DYNAMIC CONCENTRATION** (03_devils_gate.md): No hardcoded ticker names or percentages. Calculate fresh from DB every time.
+- **WORD COUNT** (04_report.md): Target <2000 prose words. Tables (Search Log, Portfolio, Validation) don't count.
+- **SECTION CHECKLIST** (04_report.md): 15 mandatory sections. Search Log + Validation Summary are CRITICAL.
+- **STOP-LOSS INVERTED** (05_position_mgmt.md, db.py): `*` speculative gets WIDEST stops (12-15%), `***` gets tightest (8-10%). Speculative picks need room to breathe.
+- **CIRCUIT BREAKER FROM PEAK** (05_position_mgmt.md, db.py): Drawdown calculated from peak portfolio value (tracked in DB), not cost basis. Circuit breaker overrides "deploy cash in crash" rule.
+- **REBALANCE vs CONVICTION** (05_position_mgmt.md): Drift trigger compares against conviction-adjusted targets, not equal-weight.
+- **EARLY PORTFOLIO SIZING** (05_position_mgmt.md): Before 20 trades, max position = total_capital / (positions + 2), capped at conviction limit.
+
+### Data & Screener Enhancements (from blind spot audit 2026-03-20)
+- **SCREENER SCANS 31 ETFs** (screener.py): CORE_ETFS list always scanned — broad market, international, bonds, REITs, commodities, all sectors. Tagged `[ETF]` in results.
+- **YIELD CURVE** (data_fetcher.py): 3M T-bill (`^IRX`) added. Prints `10Y-3M spread: [NORMAL/FLAT/INVERTED]`. Quantitative regime signal.
+- **RSP BREADTH** (data_fetcher.py): RSP (equal-weight S&P) added to benchmark. `RSP/SPY spread` catches narrow vs broad market participation.
+- **FORWARD P/E** (data_fetcher.py): Holdings show Fwd P/E, Trail P/E, PEG, Div Yield, Earnings Growth from yfinance `.info`.
+
+### From Self-Analysis (pattern detection)
+- **VERIFICATION REMINDER** (01_research.md): Every price must cite source
+- **SCREENER MANDATE** (01_research.md): Run screener before every report
+- **REPETITION GUARD** (02_strategy.md): Check DB for prior recommendations — no repeat BUYs on held positions without new catalyst
+- **OPEN POSITION REVIEW** (05_position_mgmt.md): Mandatory health check every report — stop/thesis/concentration/profit-take
+
+### From Pro Analysis (smart money insights)
+- **CONVICTION SIZING** (00_system.md): *** up to 18%, ** up to 12%, * up to 7%
+- **BUSINESS CYCLE MAPPING** (01_research.md): Map cycle stage → sector recommendations
+- **SMART MONEY VALIDATION** (02_strategy.md): Check 13F + guru + ARK + insider for every BUY
+- **SMART MONEY CHALLENGE** (03_devils_gate.md): If all 4 sources negative → FLAG
+- **PORTFOLIO-LEVEL RISK** (05_position_mgmt.md): Drawdown circuit breaker, turnover check, Kelly criterion
 
 <!-- END LEARNED RULES -->
 ## Don't
 - Don't hardcode investor data in system files — read from DB via `vault portfolio`
+- Don't hardcode portfolio values (dollar amounts, percentages, ticker names) in auto-patches — they go stale immediately
 - Don't fabricate sentiment indicators you can't verify
 - Don't claim to see chart patterns — use computed technicals from data_fetcher.py
 - Don't skip Devil's Gate to save time
@@ -225,5 +247,8 @@ They are embedded in system files as AUTO-FIX and PRO-INSIGHT patches.
 - Don't trust screener output blindly — it flags candidates, not recommendations
 - Don't generate a report without Search Log section — every ticker needs a verified price row
 - Don't generate a report without Validation Summary (Devil's Gate) section
-- Don't generate a report without running `vault preflight` first — data must be fresh, auto-patches refreshed
-- Don't ignore concentration blockers from self-analyze — if GOOGL is >15%, no BUY MORE
+- Don't generate a report without running `vault preflight` first — data must be fresh
+- Don't go 100% defensive just because regime is risk-off — evaluate ALL categories, adjust sizing
+- Don't sell at RSI <25 unless stop-loss has been hit — that's panic selling
+- Don't ignore broad market ETFs (VOO/SPLG) as candidates — especially when S&P is oversold
+- Don't leave cash earning 0% when short-term yields are >4% — recommend SHY/BIL

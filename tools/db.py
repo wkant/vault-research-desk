@@ -1728,30 +1728,49 @@ class VaultDB:
         """).fetchall()
 
     def risk_dashboard(self):
-        """Portfolio risk metrics in one query."""
+        """Portfolio risk metrics in one query.
+
+        IMPORTANT: Concentration is calculated against TOTAL CAPITAL
+        (holdings market value + cash), not just holdings value.
+        This prevents false concentration alarms when portfolio is small
+        but investor has significant cash to deploy.
+        """
         holdings = self.portfolio_dashboard()
         if not holdings:
             return {}
 
-        total_value = sum(r["market_value"] or 0 for r in holdings)
+        holdings_value = sum(r["market_value"] or 0 for r in holdings)
+        cash = self.get_cash()
+        total_capital = holdings_value + cash  # Use total capital for concentration
         total_cost = sum(r["shares"] * r["cost_basis"] for r in holdings)
 
         concentrations = []
         for h in holdings:
             mv = h["market_value"] or 0
-            pct = (mv / total_value * 100) if total_value > 0 else 0
+            pct = (mv / total_capital * 100) if total_capital > 0 else 0
             concentrations.append({
                 'ticker': h["ticker"],
                 'pct': round(pct, 1),
                 'over_limit': pct > 15
             })
 
-        drawdown = round((total_value - total_cost) / total_cost * 100, 2) if total_cost > 0 else 0
+        # Track peak portfolio value for drawdown calculation
+        peak_key = 'peak_portfolio_value'
+        stored_peak = float(self.get_setting(peak_key, '0'))
+        if total_capital > stored_peak:
+            self.set_setting(peak_key, str(round(total_capital, 2)))
+            stored_peak = total_capital
+
+        # Drawdown from peak (not from cost basis)
+        drawdown = round((total_capital - stored_peak) / stored_peak * 100, 2) if stored_peak > 0 else 0
 
         return {
-            'total_value': round(total_value, 2),
+            'total_value': round(total_capital, 2),
+            'holdings_value': round(holdings_value, 2),
+            'cash': round(cash, 2),
             'total_cost': round(total_cost, 2),
             'drawdown_pct': drawdown,
+            'peak_value': round(stored_peak, 2),
             'circuit_breaker': drawdown <= -15,
             'position_count': len(holdings),
             'concentrations': sorted(concentrations, key=lambda x: x['pct'], reverse=True),
@@ -2303,12 +2322,17 @@ class VaultDB:
     # Portfolio drift analysis
     # ------------------------------------------------------------------
     def portfolio_drift(self):
-        """Calculate allocation drift from target weights."""
+        """Calculate allocation drift from target weights.
+
+        Uses total capital (holdings + cash) as denominator, not just holdings value.
+        """
         dashboard = self.portfolio_dashboard()
         if not dashboard:
             return None
 
-        total_value = sum((r['market_value'] or 0) for r in dashboard)
+        holdings_value = sum((r['market_value'] or 0) for r in dashboard)
+        cash = self.get_cash()
+        total_value = holdings_value + cash  # Total capital including cash
         if total_value == 0:
             return None
 
@@ -2377,8 +2401,8 @@ class VaultDB:
             tranches = [('Tranche 1 (30%)', 0.30), ('Tranche 2 (25%)', 0.25),
                         ('Tranche 3 (25%)', 0.25), ('Tranche 4 (20%)', 0.20)]
 
-        # Stop-loss distances by conviction
-        stop_pct = {'***': 0.11, '**': 0.09, '*': 0.075}.get(conviction, 0.09)
+        # Stop-loss distances by conviction (wider for speculative, tighter for high-conviction)
+        stop_pct = {'***': 0.09, '**': 0.11, '*': 0.135}.get(conviction, 0.11)
 
         result = {
             'ticker': ticker,
@@ -2707,11 +2731,14 @@ class VaultDB:
             regime = 'TRANSITION'
             confidence = 50
 
+        # Posture adjusts CASH and SIZING, not stock SELECTION.
+        # Even in RISK-OFF, strong individual signals (smart money, technicals)
+        # can justify growth/tech positions — just with smaller size and more cash.
         posture = {
-            'RISK-ON': 'Offensive — favor growth, reduce cash',
-            'RISK-OFF': 'Defensive — raise cash, favor value/staples',
-            'TRANSITION': 'Balanced — maintain positions, tighten stops',
-            'NEUTRAL': 'Standard allocation per risk tolerance',
+            'RISK-ON': 'Offensive — increase position sizes, reduce cash to low end of range. All categories open.',
+            'RISK-OFF': 'Cautious — increase cash to high end of range, reduce tranche sizes. ALL categories still open — evaluate growth/defensive/hedge candidates equally. Regime adjusts sizing, not selection.',
+            'TRANSITION': 'Balanced — maintain positions, tighten stops. All categories open.',
+            'NEUTRAL': 'Standard allocation per risk tolerance. All categories open.',
         }
 
         return {

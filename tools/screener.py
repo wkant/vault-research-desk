@@ -117,6 +117,26 @@ SP500_TICKERS = [
     "XEL", "XOM", "XRAY", "XYL", "YUM", "ZBH", "ZBRA", "ZION", "ZTS",
 ]
 
+# ---------------------------------------------------------------------------
+# Core ETFs — always scanned alongside S&P 500 sample
+# ---------------------------------------------------------------------------
+CORE_ETFS = [
+    # Broad market
+    'VOO', 'SPY', 'VTI', 'SPLG', 'QQQ', 'RSP',
+    # International
+    'VEA', 'VWO', 'VXUS', 'EFA',
+    # Bonds
+    'TLT', 'BND', 'AGG', 'SHY', 'BIL', 'TIP',
+    # REITs
+    'VNQ',
+    # Commodities
+    'GLD', 'SLV', 'DBC',
+    # Sector ETFs
+    'XLK', 'XLV', 'XLF', 'XLE', 'XLY', 'XLP', 'XLI', 'XLB', 'XLRE', 'XLU', 'XLC',
+]
+
+CORE_ETFS_SET = set(CORE_ETFS)
+
 
 def fetch_price_and_volume(ticker):
     """Fetch current price and volume data using yfinance 5-day history.
@@ -269,6 +289,7 @@ def scan_ticker(ticker, missing_sectors=None, owned_tickers=None):
         "sector": sector,
         "signals": signals,
         "score": score,
+        "is_etf": ticker in CORE_ETFS_SET,
     }
 
 
@@ -323,12 +344,29 @@ def print_results(all_results, top_n):
     print(f"{'═' * 55}")
     print(f"  Scanned: {scan_count} | Signals found: {total_signals}")
 
-    # Categorize
-    oversold = [r for r in all_results if "Oversold" in r["signals"]]
-    golden = [r for r in all_results if "Golden Cross" in r["signals"]]
-    near_low = [r for r in all_results if "Near 52wk Low" in r["signals"]]
-    overbought = [r for r in all_results if "Overbought" in r["signals"]]
-    unusual_vol = [r for r in all_results if "Unusual Volume" in r["signals"]]
+    # Separate ETF results
+    etf_results = [r for r in all_results if r.get("is_etf")]
+    stock_results = [r for r in all_results if not r.get("is_etf")]
+
+    # Core ETF signals section
+    if etf_results:
+        print(f"\nCORE ETF SIGNALS:")
+        header = f"  {'Ticker':<8} {'Price':>9} {'RSI':>6} {'vs50DMA':>9} {'vs200DMA':>9} {'Signals'}"
+        print(header)
+        print(f"  {'─' * 70}")
+        for r in sorted(etf_results, key=lambda x: x["score"], reverse=True):
+            vs50 = _fmt_pct(r["price"], r.get("dma_50"))
+            vs200 = _fmt_pct(r["price"], r.get("dma_200"))
+            rsi_str = f"{r.get('rsi'):.1f}" if r.get("rsi") is not None else "-"
+            sig_str = ", ".join(r["signals"])
+            print(f"  {r['ticker']:<8} {r['price']:>9.2f} {rsi_str:>6} {vs50:>9} {vs200:>9}  {sig_str}")
+
+    # Categorize (stocks only, ETFs already shown above)
+    oversold = [r for r in stock_results if "Oversold" in r["signals"]]
+    golden = [r for r in stock_results if "Golden Cross" in r["signals"]]
+    near_low = [r for r in stock_results if "Near 52wk Low" in r["signals"]]
+    overbought = [r for r in stock_results if "Overbought" in r["signals"]]
+    unusual_vol = [r for r in stock_results if "Unusual Volume" in r["signals"]]
 
     print_section("OVERSOLD (RSI < 30):", oversold)
     print_section("GOLDEN CROSS:", golden)
@@ -367,6 +405,8 @@ def print_results(all_results, top_n):
             sig_str = ", ".join(r["signals"])
             # Flag overlap with existing watchlist or theses
             tags = []
+            if r.get('is_etf'):
+                tags.append("ETF")
             if r['ticker'] in watchlist_tickers:
                 tags.append("ON WATCHLIST")
             if r['ticker'] in thesis_tickers:
@@ -399,6 +439,11 @@ def main():
     tickers = SP500_TICKERS[:]
     if args.sample > 0:
         tickers = random.sample(tickers, min(args.sample, len(tickers)))
+
+    # Always include CORE_ETFS (deduplicated against the stock list)
+    stock_set = set(tickers)
+    etfs_to_add = [etf for etf in CORE_ETFS if etf not in stock_set]
+    tickers = tickers + etfs_to_add
 
     scan_count = len(tickers)
     total = len(tickers)

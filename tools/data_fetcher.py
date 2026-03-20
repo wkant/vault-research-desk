@@ -35,6 +35,7 @@ MACRO_TICKERS = [
     "^DJI",    # Dow Jones
     "^VIX",    # VIX
     "^TNX",    # 10Y Treasury Yield
+    "^IRX",    # 13-Week T-Bill Yield (for yield curve)
     "DX-Y.NYB",  # Dollar Index (DXY)
     "CL=F",    # WTI Crude Oil
     "GC=F",    # Gold Futures
@@ -89,8 +90,8 @@ BREADTH_SAMPLE = [
 
 MACRO_NAMES = {
     "^GSPC": "S&P 500", "^IXIC": "Nasdaq", "^DJI": "Dow Jones",
-    "^VIX": "VIX", "^TNX": "10Y Yield", "DX-Y.NYB": "DXY",
-    "CL=F": "WTI Oil", "GC=F": "Gold",
+    "^VIX": "VIX", "^TNX": "10Y Yield", "^IRX": "3M T-Bill",
+    "DX-Y.NYB": "DXY", "CL=F": "WTI Oil", "GC=F": "Gold",
 }
 
 SECTOR_NAMES = {
@@ -434,6 +435,20 @@ def main():
                 err = q.get('error', 'no data') if q else 'no data'
                 print(f"{name:<15} {'ERROR':>12} {err}")
 
+        # Yield Curve (10Y - 3M spread)
+        ten_y = macro_prices.get("^TNX")
+        three_m = macro_prices.get("^IRX")
+        if ten_y is not None and three_m is not None:
+            # ^TNX and ^IRX are already in percentage points (e.g., 4.25 = 4.25%)
+            spread = round(ten_y - three_m, 2)
+            if spread < 0:
+                curve_label = "INVERTED"
+            elif spread <= 0.5:
+                curve_label = "FLAT"
+            else:
+                curve_label = "NORMAL"
+            print(f"\n  Yield Curve (10Y-3M):  {spread:+.2f}%  [{curve_label}]")
+
     # --- Sector ETFs ---
     sector_ranked = []
     if not portfolio_only:
@@ -486,7 +501,7 @@ def main():
     # --- Benchmark ---
     if not portfolio_only:
         print(f"\n{'─' * 40}")
-        print("BENCHMARK (VOO)")
+        print("BENCHMARK (VOO + RSP)")
         print(f"{'─' * 40}")
         q = fetch_quote(BENCHMARK)
         if q and 'error' not in q:
@@ -495,6 +510,32 @@ def main():
         if tech:
             print(f"  RSI: {tech.get('rsi', '-')} | 50 DMA: ${tech.get('dma_50', '-')} | 200 DMA: ${tech.get('dma_200', '-')}")
             print(f"  52-wk range: ${tech.get('low_52w', '-')} - ${tech.get('high_52w', '-')} ({tech.get('pct_from_high', '-')}% from high)")
+
+        # RSP (Equal-Weight S&P 500) for breadth measurement
+        rsp_q = fetch_quote("RSP")
+        if rsp_q and 'error' not in rsp_q:
+            print(f"RSP: ${rsp_q['price']:.2f} ({'+' if rsp_q['change_pct'] >= 0 else ''}{rsp_q['change_pct']:.2f}%)")
+            rsp_tech = fetch_technicals("RSP")
+            if rsp_tech:
+                print(f"  RSI: {rsp_tech.get('rsi', '-')} | 50 DMA: ${rsp_tech.get('dma_50', '-')} | 200 DMA: ${rsp_tech.get('dma_200', '-')}")
+            # RSP/SPY spread (YTD return comparison)
+            try:
+                spy = yf.Ticker("SPY")
+                rsp_tk = yf.Ticker("RSP")
+                year_start = f"{datetime.now().year}-01-01"
+                spy_hist = spy.history(start=year_start)
+                rsp_hist = rsp_tk.history(start=year_start)
+                if not spy_hist.empty and not rsp_hist.empty:
+                    spy_ytd = (spy_hist['Close'].iloc[-1] / spy_hist['Close'].iloc[0] - 1) * 100
+                    rsp_ytd = (rsp_hist['Close'].iloc[-1] / rsp_hist['Close'].iloc[0] - 1) * 100
+                    spread = round(rsp_ytd - spy_ytd, 1)
+                    if spread < 0:
+                        breadth_note = "negative = narrow market"
+                    else:
+                        breadth_note = "positive = broad participation"
+                    print(f"  RSP/SPY spread: {spread:+.1f}% ({breadth_note})")
+            except Exception as e:
+                print(f"  RSP/SPY spread: error — {e}")
 
     # --- Portfolio Holdings (detailed) ---
     total_value = 0
@@ -525,6 +566,34 @@ def main():
             if tech:
                 print(f"    50 DMA: ${tech.get('dma_50', '-')} | 200 DMA: ${tech.get('dma_200', '-')} | RSI: {tech.get('rsi', '-')}")
                 print(f"    52-wk: ${tech.get('low_52w', '-')} - ${tech.get('high_52w', '-')} ({tech.get('pct_from_high', '-')}% from high)")
+
+            # Fundamentals (from yfinance .info)
+            try:
+                info = yf.Ticker(ticker).info
+                fwd_pe = info.get('forwardPE')
+                trail_pe = info.get('trailingPE')
+                peg = info.get('pegRatio')
+                div_yield = info.get('trailingAnnualDividendYield') or info.get('yield')
+                earn_growth = info.get('earningsGrowth')
+
+                parts = []
+                if fwd_pe is not None:
+                    parts.append(f"Fwd P/E: {fwd_pe:.1f}")
+                if trail_pe is not None:
+                    parts.append(f"Trail P/E: {trail_pe:.1f}")
+                if peg is not None:
+                    parts.append(f"PEG: {peg:.2f}")
+                if div_yield is not None and div_yield > 0:
+                    parts.append(f"Div Yield: {div_yield * 100:.1f}%")
+                if earn_growth is not None:
+                    parts.append(f"Earn Growth: {earn_growth * 100:.1f}%")
+
+                if parts:
+                    print(f"    Fundamentals: {' | '.join(parts)}")
+                else:
+                    print(f"    Fundamentals: N/A (no data available)")
+            except Exception:
+                print(f"    Fundamentals: N/A (fetch error)")
 
             # Earnings check
             earnings = fetch_earnings_date(ticker)

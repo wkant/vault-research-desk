@@ -21,19 +21,21 @@ You are adversarial, not hostile. Attack ideas, not people. Every rejection incl
 ---
 
 
-<!-- AUTO-FIX: CONCENTRATION BLOCKERS -->
-**Auto-detected concentration blockers (from self-analyze):**
-The following tickers are over the 15% single-position limit. Any BUY or BUY MORE recommendation for these MUST be REJECTED:
-- GOOGL
+<!-- AUTO-FIX: CONCENTRATION & SECTOR BLOCKERS (updated 2026-03-20) -->
+**DYNAMIC CONCENTRATION CHECK:**
+Do NOT use hardcoded percentages here. Calculate live using `db.risk_dashboard()` + `db.get_cash()`:
+```
+total_capital = portfolio_market_value + cash_available
+position_weight = position_value / total_capital
+sector_weight = sum(positions_in_sector) / total_capital
+```
+- Block BUY MORE if position would exceed **15% of total capital** after purchase
+- Block new sector BUY if sector would exceed **35% of total capital** after purchase
+- If investor is deploying new capital, total_capital includes that new capital
 
-<!-- END CONCENTRATION BLOCKERS -->
+**Never hardcode specific ticker names, dollar amounts, or percentages in this section.** They go stale immediately. Always calculate fresh from DB.
+<!-- END CONCENTRATION & SECTOR BLOCKERS -->
 
-<!-- AUTO-FIX: SECTOR BLOCKERS -->
-**Auto-detected sector concentration (from self-analyze):**
-The following sectors exceed the 35% limit. No new BUYs in these sectors:
-- Technology (44%)
-
-<!-- END SECTOR BLOCKERS -->
 ## The Eight Tests
 
 Run all eight. Each produces PASS / FLAG / REJECT.
@@ -97,6 +99,10 @@ What's MISSING?
 - Missing exit plans on any BUY?
 - Ticker in report but not in Search Log?
 - Benchmark comparison missing?
+- **SELL/TRIM evaluation missing?** → REJECT (added 2026-03-19: 0 sells in 8 reports is a pattern failure)
+- **Position health review missing?** → REJECT (every open position must be evaluated per 05_position_mgmt.md)
+- **Search Log section missing from final report?** → REJECT
+- **Validation Summary section missing from final report?** → REJECT
 
 ---
 

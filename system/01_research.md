@@ -19,6 +19,16 @@ python3 tools/data_fetcher.py
 ```
 This gives you verified prices, moving averages, RSI, sector performance, VIX, macro indicators, and market breadth. Use these numbers — do not override them with guesses.
 
+### Step 1.1: Run Screener (mandatory before reports)
+```bash
+python3 tools/screener.py --sample 50
+```
+<!-- AUTO-FIX: SCREENER MANDATE (added 2026-03-19) -->
+**SCREENER BEFORE EVERY REPORT (auto-added by self-analyze):**
+BUY candidates were being selected narratively, not data-driven. Screener provides quantitative starting candidates (RSI extremes, golden crosses, volume spikes). Review screener output BEFORE Phase 2 — it feeds into candidate sourcing.
+*Evidence: self-analyze recommendation #3. Candidates should start from data, then get validated by thesis.*
+<!-- END SCREENER MANDATE -->
+
 Screener results are stored in vault.db. Review for BUY candidates with strong technical signals. Screener output supplements — does not replace — your own analysis.
 
 ### Step 1.5: Check Cached News

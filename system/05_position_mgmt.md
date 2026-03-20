@@ -28,11 +28,13 @@ Set at time of purchase. Non-negotiable.
 
 **Priority:** Use a meaningful technical level (support, 50/200 DMA, 52-week low) that falls within the conviction range below. If no meaningful level exists within range, use the percentage rule as fallback.
 
-| Conviction | Stop Distance | Example |
-|-----------|--------------|---------|
-| `***` HIGH | 10-12% below entry | Entry $100, stop $88-90 |
-| `**` MEDIUM | 8-10% below entry | Entry $100, stop $90-92 |
-| `*` LOW | 7-8% below entry | Entry $100, stop $92-93 |
+| Conviction | Stop Distance | Example | Rationale |
+|-----------|--------------|---------|-----------|
+| `***` HIGH | 8-10% below entry | Entry $100, stop $90-92 | Strongest thesis → tighter stop is safe |
+| `**` MEDIUM | 10-12% below entry | Entry $100, stop $88-90 | Standard room to breathe |
+| `*` LOW | 12-15% below entry | Entry $100, stop $85-88 | Speculative/contrarian needs room — volatile by nature |
+
+<!-- LOGIC FIX (2026-03-20): Inverted stop distances. Old logic gave * tightest stops (7-8%), but speculative picks are the most volatile and get stopped out before thesis can play out. Now * gets widest stops to compensate for volatility. *** gets tightest because high-conviction thesis should hold up. -->
 
 ### Trailing Stops
 After a position moves in your favor:
@@ -69,8 +71,10 @@ After a position moves in your favor:
 
 ### When to Rebalance
 - **Quarterly:** Every 3 months, review allocation vs. targets
-- **Drift trigger:** Any single position >5% away from target weight
-- **Sector trigger:** Any sector >35% of portfolio
+- **Drift trigger:** Any single position >5% away from its **conviction-adjusted target weight** (not equal-weight)
+- **Sector trigger:** Any sector >35% of total capital (portfolio + cash)
+
+<!-- LOGIC FIX (2026-03-20): Drift trigger must compare against conviction-adjusted targets, not equal-weight. A *** position at 18% is NOT drifting if its target is 15-18%. Set targets at purchase time: *** = 15-18%, ** = 10-12%, * = 5-7%. The 5% drift applies relative to THESE targets. -->
 
 ### How to Rebalance
 1. Identify overweight positions (trim these)
@@ -108,6 +112,23 @@ Set at time of purchase. Example for a 4-position portfolio:
 
 ---
 
+<!-- AUTO-FIX: OPEN POSITION REVIEW (updated 2026-03-20) -->
+## Open Position Review (Mandatory Every Report)
+
+Every report MUST include a health check for EACH open position:
+1. **Stop-loss status:** Current price vs stop price. Has it been hit? → SELL
+2. **Thesis status:** Is the original thesis still valid? What changed? → If broken, SELL
+3. **Profit-taking triggers:** Check against +30%/+50%/+100% thresholds above
+4. **Concentration check:** Is position >15% of **total capital** (not just holdings)? → TRIM
+5. **Smart money alignment:** Are pros still holding? If all selling → FLAG for review
+
+Output a position health table:
+| Ticker | Entry | Current | P&L | Stop | Thesis | Action |
+If ANY position triggers a SELL/TRIM rule, it MUST appear in the report's Portfolio section.
+
+**Oversold guard:** If a position is at RSI <25, do not SELL unless the stop-loss has been hit. Deeply oversold positions are more likely to bounce than fall further. Selling at RSI extremes is panic selling.
+<!-- END OPEN POSITION REVIEW -->
+
 ## Performance Tracking
 
 ### After Every Report
@@ -141,11 +162,14 @@ Tax rules depend on the investor's location (read from vault.db via `vault portf
 ## Portfolio-Level Risk Controls (learned from pro analysis)
 
 ### Drawdown Circuit Breaker
-If portfolio drops **15% from peak value**:
+If portfolio drops **15% from peak value** (NOT from cost basis):
 1. Raise cash to 30%+ (trim weakest positions first)
 2. Tighten all trailing stops by one tier
-3. No new BUY recommendations until drawdown recovers to -10%
+3. No new BUY recommendations until drawdown recovers to -10% from peak
 4. Type `flash` for emergency assessment
+
+<!-- LOGIC FIX (2026-03-20): db.py calculates drawdown from cost basis, not peak. A portfolio up 30% that falls 20% from peak shows +4% from cost — circuit breaker never fires. Track peak_portfolio_value in DB settings. Calculate drawdown = (current - peak) / peak. -->
+**Implementation:** Store peak portfolio value in vault.db settings table. Update on every `portfolio_dashboard()` call when current value > stored peak. Drawdown = `(current_value - peak_value) / peak_value`.
 
 *Source: Funds with stop-loss clauses consistently outperform. Portfolio-level limits prevent catastrophic losses.*
 
@@ -178,24 +202,36 @@ Retail adaptation:
 
 *Source: Berkshire top 5 holdings = 70% of $267B portfolio. Concentration works when thesis is validated.*
 
-### Simplified Kelly Criterion (after 20+ trades)
-Once vault.db has 20+ closed trades, calculate:
+### Position Sizing Sanity Check
+
+**Before 20 trades (early portfolio):**
+Use a simple diversification rule as sizing guardrail:
+```
+max_position = total_capital / (number_of_positions + 2)
+```
+Capped at conviction limit (*** 18%, ** 12%, * 7%). Example: 4 positions → max = 1/6 = 16.7% per position.
+
+<!-- LOGIC FIX (2026-03-20): Kelly was gated behind 20+ trades, leaving no mathematical sizing check during the critical early phase when concentration mistakes hurt most. This simple rule provides a floor that loosens as the portfolio grows. -->
+
+**After 20+ closed trades (Kelly Criterion):**
 ```
 kelly_pct = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win
 ```
-Use half-Kelly (kelly_pct / 2) as a sanity check on position sizing.
-If your actual position sizes consistently exceed Kelly, you're over-betting.
+Use half-Kelly (kelly_pct / 2) as a sanity check. If positions consistently exceed Kelly, you're over-betting.
 
 *Source: Renaissance Technologies uses Kelly Criterion for optimal position sizing.*
 
 ## Emergency Rules
 
+<!-- LOGIC FIX (2026-03-20): Circuit breaker says "raise cash to 30%" while crash rule says "deploy cash if VIX >35". These fire simultaneously in a severe crash. Priority: circuit breaker wins. Only deploy cash in a crash if portfolio is NOT in circuit breaker state (drawdown <15% from peak). -->
+
 ### Market Crash (S&P -10% in a week)
 1. Do NOT panic sell
 2. Review all stop-losses — let them do their job
 3. If stops haven't triggered, positions are still within plan
-4. Deploy cash reserve into highest-conviction positions if VIX >35
-5. Type `flash` for immediate guidance
+4. **If circuit breaker is NOT active** (drawdown <15% from peak): deploy cash into highest-conviction positions if VIX >35
+5. **If circuit breaker IS active** (drawdown >15%): do NOT deploy cash. Stabilize first. Circuit breaker overrides this rule.
+6. Type `flash` for immediate guidance
 
 ### Flash Crash / Black Swan
 1. Do nothing for 24 hours
